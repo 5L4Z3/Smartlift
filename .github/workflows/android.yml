@@ -48,3 +48,5 @@ jobs:
         with:
           name: smartlift.apk
           path: bin/*.apk
+
+#force start
