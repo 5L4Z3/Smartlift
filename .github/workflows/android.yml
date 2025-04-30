@@ -1,0 +1,50 @@
+name: Build Kivy APK
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /opt/android-sdk
+      PATH: /opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:$PATH
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10.13'
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y zip unzip openjdk-17-jdk python3-pip wget tar
+
+          # Install Android SDK command line tools
+          sudo mkdir -p /opt/android-sdk/cmdline-tools
+          cd /opt/android-sdk/cmdline-tools
+          sudo wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
+          sudo unzip cmdline-tools.zip -d /opt/android-sdk/cmdline-tools
+          sudo rm cmdline-tools.zip
+          sudo mv /opt/android-sdk/cmdline-tools/cmdline-tools latest
+
+          yes | sudo /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
+          sudo /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-31" "build-tools;33.0.2"
+
+          pip install --upgrade pip
+          pip install buildozer Cython
+
+      - name: Build APK
+        run: |
+          buildozer android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartlift.apk
+          path: bin/*.apk
