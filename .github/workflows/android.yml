@@ -9,11 +9,15 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ANDROID_HOME: /opt/android-sdk
-      PATH: /opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:$PATH
+      PATH: /opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/usr/bin:/bin:/opt/android-sdk/cmdline-tools/latest/bin:$PATH
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Download Repository ZIP
+        run: |
+          wget https://github.com/${{ github.repository }}/archive/refs/heads/main.zip -O repo.zip
+          unzip repo.zip
+          mv ${GITHUB_REPOSITORY##*/}-main/* ./
+          rm -rf ${GITHUB_REPOSITORY##*/}-main repo.zip
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -24,7 +28,10 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y zip unzip openjdk-17-jdk python3-pip wget tar
-
+          
+          # Check if tar is installed correctly
+          tar --version || echo "tar not found"
+          
           # Install Android SDK command line tools
           sudo mkdir -p /opt/android-sdk/cmdline-tools
           cd /opt/android-sdk/cmdline-tools
@@ -33,6 +40,7 @@ jobs:
           sudo rm cmdline-tools.zip
           sudo mv /opt/android-sdk/cmdline-tools/cmdline-tools latest
 
+          # Accept licenses and install essential build tools
           yes | sudo /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
           sudo /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-31" "build-tools;33.0.2"
 
@@ -48,5 +56,3 @@ jobs:
         with:
           name: smartlift.apk
           path: bin/*.apk
-
-#force start
