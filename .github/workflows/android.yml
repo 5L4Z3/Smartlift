@@ -7,17 +7,15 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      ANDROID_HOME: /opt/android-sdk
-      PATH: /opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/usr/bin:/bin:/opt/android-sdk/cmdline-tools/latest/bin:$PATH
 
     steps:
-      - name: Download Repository ZIP
+      - name: Install tar (for GitHub checkout)
         run: |
-          wget https://github.com/${{ github.repository }}/archive/refs/heads/main.zip -O repo.zip
-          unzip repo.zip
-          mv ${GITHUB_REPOSITORY##*/}-main/* ./
-          rm -rf ${GITHUB_REPOSITORY##*/}-main repo.zip
+          sudo apt-get update
+          sudo apt-get install -y tar
+
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -27,32 +25,10 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y zip unzip openjdk-17-jdk python3-pip wget tar
-          
-          # Check if tar is installed correctly
-          tar --version || echo "tar not found"
-          
+          sudo apt install -y zip unzip openjdk-17-jdk python3-pip wget
+
           # Install Android SDK command line tools
           sudo mkdir -p /opt/android-sdk/cmdline-tools
           cd /opt/android-sdk/cmdline-tools
           sudo wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
-          sudo unzip cmdline-tools.zip -d /opt/android-sdk/cmdline-tools
-          sudo rm cmdline-tools.zip
-          sudo mv /opt/android-sdk/cmdline-tools/cmdline-tools latest
-
-          # Accept licenses and install essential build tools
-          yes | sudo /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
-          sudo /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-31" "build-tools;33.0.2"
-
-          pip install --upgrade pip
-          pip install buildozer Cython
-
-      - name: Build APK
-        run: |
-          buildozer android debug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: smartlift.apk
-          path: bin/*.apk
+          sudo unzip cmdline-tools.zip -d /
