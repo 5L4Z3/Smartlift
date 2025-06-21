@@ -26,21 +26,20 @@ jobs:
             git \
             zip \
             unzip \
-            openjdk-17-jdk \
+            openjdk-11-jdk \
             python3-pip \
             libgl1-mesa-dev \
             libffi-dev \
             libssl-dev \
             libsqlite3-dev \
-            zlib1g-dev \
-            libncurses5
+            zlib1g-dev
 
           pip install --upgrade pip
           pip install cython virtualenv buildozer
 
       - name: Build APK
         run: |
-          cd smartlift  # adjust this if your buildozer.spec is in a different folder
+          cd smartlift  # change if your buildozer.spec is elsewhere
           buildozer android debug
 
       - name: Upload APK
