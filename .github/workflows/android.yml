@@ -54,11 +54,13 @@ jobs:
 
       - name: Build APK
         env:
-          ANDROIDSDK: $HOME/android-sdk
+          ANDROID_SDK_ROOT: $HOME/android-sdk
           ANDROID_NDK_HOME: $HOME/android-sdk/ndk/21.4.7075529
           ANDROID_HOME: $HOME/android-sdk
-          PATH: $HOME/android-sdk/cmdline-tools/latest/bin:$HOME/android-sdk/platform-tools:$PATH
+          PATH: $HOME/android-sdk/cmdline-tools/latest/bin:$HOME/android-sdk/platform-tools:/usr/bin:/usr/local/bin:$PATH
         run: |
+          which git  # debug check
+          git --version
           buildozer android debug
 
       - name: Upload APK
