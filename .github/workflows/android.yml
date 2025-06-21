@@ -39,11 +39,10 @@ jobs:
 
       - name: Build APK
         run: |
-          cd smartlift  # change if your buildozer.spec is elsewhere
           buildozer android debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: SmartLift-APK
-          path: smartlift/bin/*.apk
+          path: bin/*.apk
