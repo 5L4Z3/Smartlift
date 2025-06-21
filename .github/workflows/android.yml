@@ -1,9 +1,9 @@
-name: Android Build
+name: Build Android APK
 
 on:
   push:
     branches:
-      - main  # or your main branch name
+      - main  # Change if your default branch is different
   workflow_dispatch:
 
 jobs:
@@ -14,44 +14,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
-          python-version: 3.10
+          python-version: "3.10"
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install buildozer cython
-
-      - name: Install required system packages
-        run: |
           sudo apt update
           sudo apt install -y \
-            zip unzip git openjdk-17-jdk python3-pip \
-            python3-setuptools python3-wheel \
-            libncurses5 libstdc++6 libffi-dev \
-            libssl-dev libsqlite3-dev libjpeg-dev \
-            zlib1g-dev libpng-dev
-
-      - name: Initialize Buildozer (if needed)
-        run: |
-          if [ ! -f buildozer.spec ]; then
-            buildozer init
-          fi
-
-      - name: Use custom buildozer.spec (if provided)
-        run: |
-          if [ -f .github/workflows/buildozer.spec ]; then
-            cp .github/workflows/buildozer.spec buildozer.spec
-          fi
-
-      - name: Build APK
-        run: |
-          buildozer android debug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: smartlift-debug-apk
-          path: bin/*.apk
+            git zip unzip openjdk-17-jdk python3-pip python3-setuptools \
+            python3-wheel python3-virtualenv libffi-dev libssl-dev \
+            libsqlite3-dev libjpeg-dev libfreetype6-dev zlib1g-dev \
