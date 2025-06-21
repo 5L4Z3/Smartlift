@@ -33,7 +33,11 @@ jobs:
             libssl-dev \
             libsqlite3-dev \
             zlib1g-dev \
-            curl
+            curl \
+            autoconf \
+            automake \
+            libtool \
+            pkg-config
 
       - name: Set up Android SDK inside Buildozer folder
         run: |
