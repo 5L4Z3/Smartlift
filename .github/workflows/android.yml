@@ -1,9 +1,9 @@
-name: Build Android APK
+name: Android Build
 
 on:
   push:
     branches:
-      - main
+      - main  # or your main branch name
   workflow_dispatch:
 
 jobs:
@@ -11,48 +11,47 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.10
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          zip unzip ant python3-pip openjdk-17-jdk \
-          libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-          libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev \
-          zlib1g-dev libgstreamer1.0 libgstreamer1.0-dev \
-          libmtdev-dev xclip xsel libjpeg-dev \
-          libopencv-dev libgl1-mesa-dev libgles2-mesa-dev \
-          libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev \
-          libxi-dev libsm-dev libxext-dev libatk1.0-dev libcairo2-dev \
-          libpango1.0-dev libgdk-pixbuf2.0-dev
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install buildozer cython
 
-    - name: Install Buildozer and Cython
-      run: |
-        pip install --upgrade pip
-        pip install buildozer cython
+      - name: Install required system packages
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            zip unzip git openjdk-17-jdk python3-pip \
+            python3-setuptools python3-wheel \
+            libncurses5 libstdc++6 libffi-dev \
+            libssl-dev libsqlite3-dev libjpeg-dev \
+            zlib1g-dev libpng-dev
 
-    - name: Initialize Buildozer
-      run: buildozer init
+      - name: Initialize Buildozer (if needed)
+        run: |
+          if [ ! -f buildozer.spec ]; then
+            buildozer init
+          fi
 
-    - name: Replace buildozer.spec with custom one (if provided)
-      run: |
-        if [ -f .github/workflows/buildozer.spec ]; then
-          cp .github/workflows/buildozer.spec buildozer.spec
-        fi
+      - name: Use custom buildozer.spec (if provided)
+        run: |
+          if [ -f .github/workflows/buildozer.spec ]; then
+            cp .github/workflows/buildozer.spec buildozer.spec
+          fi
 
-    - name: Build APK
-      run: |
-        buildozer android debug
+      - name: Build APK
+        run: |
+          buildozer android debug
 
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: SmartLift-APK
-        path: bin/*.apk
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartlift-debug-apk
+          path: bin/*.apk
