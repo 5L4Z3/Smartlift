@@ -39,6 +39,11 @@ jobs:
 
       - name: Build APK
         run: |
+          echo "[app]" >> buildozer.spec
+          echo "android.sdk_path = $HOME/.buildozer/android/platform/android-sdk" >> buildozer.spec
+          echo "android.ndk_path = $HOME/.buildozer/android/platform/android-ndk-r25b" >> buildozer.spec
+          echo "android.ndk_api = 21" >> buildozer.spec
+          echo "android.build_tools_version = 31.0.0" >> buildozer.spec
           buildozer android debug
 
       - name: Upload APK
