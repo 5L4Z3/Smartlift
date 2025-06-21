@@ -37,6 +37,8 @@ jobs:
             autoconf \
             automake \
             libtool \
+            libtool-bin \
+            gettext \
             pkg-config
 
       - name: Set up Android SDK inside Buildozer folder
