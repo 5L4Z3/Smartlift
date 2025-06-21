@@ -11,16 +11,48 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zip unzip openjdk-17-jdk ant python3-pip
-          pip install
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          zip unzip ant python3-pip openjdk-17-jdk \
+          libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+          libportmidi-dev libswscale-dev libavformat-dev libavcodec-dev \
+          zlib1g-dev libgstreamer1.0 libgstreamer1.0-dev \
+          libmtdev-dev xclip xsel libjpeg-dev \
+          libopencv-dev libgl1-mesa-dev libgles2-mesa-dev \
+          libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev \
+          libxi-dev libsm-dev libxext-dev libatk1.0-dev libcairo2-dev \
+          libpango1.0-dev libgdk-pixbuf2.0-dev
+
+    - name: Install Buildozer and Cython
+      run: |
+        pip install --upgrade pip
+        pip install buildozer cython
+
+    - name: Initialize Buildozer
+      run: buildozer init
+
+    - name: Replace buildozer.spec with custom one (if provided)
+      run: |
+        if [ -f .github/workflows/buildozer.spec ]; then
+          cp .github/workflows/buildozer.spec buildozer.spec
+        fi
+
+    - name: Build APK
+      run: |
+        buildozer android debug
+
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: SmartLift-APK
+        path: bin/*.apk
