@@ -1,40 +1,50 @@
-- name: Install dependencies
-  run: |
-    sudo apt update
-    sudo apt install -y \
-      build-essential \
-      libssl-dev \
-      libffi-dev \
-      python3-dev \
-      git \
-      zip \
-      unzip \
-      openjdk-17-jdk \
-      curl \
-      libncurses5 \
-      libstdc++6 \
-      zlib1g-dev \
-      libsqlite3-dev \
-      libgdbm-dev \
-      libbz2-dev \
-      libreadline-dev \
-      liblzma-dev \
-      libncursesw5-dev \
-      libtinfo5 \
-      ffmpeg \
-      libsdl2-dev \
-      libsdl2-image-dev \
-      libsdl2-mixer-dev \
-      libsdl2-ttf-dev \
-      libportmidi-dev \
-      libswscale-dev \
-      libavformat-dev \
-      libavcodec-dev \
-      libfreetype6-dev \
-      libjpeg-dev \
-      libpng-dev \
-      libgl1-mesa-dev \
-      libgles2-mesa-dev \
-      xclip \
-      xsel \
-      python3-pip
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential \
+            git \
+            zip \
+            unzip \
+            openjdk-17-jdk \
+            python3-pip \
+            libgl1-mesa-dev \
+            libffi-dev \
+            libssl-dev \
+            libsqlite3-dev \
+            zlib1g-dev \
+            libncurses5
+
+          pip install --upgrade pip
+          pip install cython virtualenv buildozer
+
+      - name: Build APK
+        run: |
+          cd smartlift  # adjust this if your buildozer.spec is in a different folder
+          buildozer android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartLift-APK
+          path: smartlift/bin/*.apk
