@@ -35,4 +35,37 @@ jobs:
             zlib1g-dev \
             curl
 
-      - name: Set up Android SDK inside
+      - name: Set up Android SDK inside Buildozer folder
+        run: |
+          SDK_DIR=$HOME/.buildozer/android/platform/android-sdk
+          mkdir -p $SDK_DIR/cmdline-tools
+          cd $SDK_DIR/cmdline-tools
+          curl -o sdk.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip sdk.zip
+          mv cmdline-tools latest
+          ln -s $SDK_DIR/cmdline-tools/latest $SDK_DIR/tools
+          export ANDROID_SDK_ROOT=$SDK_DIR
+          export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
+          yes | sdkmanager --licenses
+          sdkmanager "platform-tools" "platforms;android-31" "build-tools;31.0.0" "ndk;21.4.7075529"
+
+      - name: Install Python packages
+        run: |
+          pip install --upgrade pip
+          pip install cython virtualenv buildozer
+
+      - name: Build APK
+        env:
+          ANDROIDSDK: $HOME/.buildozer/android/platform/android-sdk
+          ANDROID_SDK_ROOT: $HOME/.buildozer/android/platform/android-sdk
+          ANDROID_NDK_HOME: $HOME/.buildozer/android/platform/android-sdk/ndk/21.4.7075529
+          ANDROID_HOME: $HOME/.buildozer/android/platform/android-sdk
+          PATH: $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:$HOME/.buildozer/android/platform/android-sdk/platform-tools:/usr/bin:/usr/local/bin:$PATH
+        run: |
+          buildozer android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartLift-APK
+          path: bin/*.apk
