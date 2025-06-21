@@ -2,76 +2,38 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    branches:
+      - main
 
 jobs:
   build:
+    name: Build APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      - name: Install system dependencies
+      - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install -y \
-            build-essential \
-            git \
-            zip \
-            unzip \
-            openjdk-11-jdk \
-            python3-pip \
-            libgl1-mesa-dev \
-            libffi-dev \
-            libssl-dev \
-            libsqlite3-dev \
-            zlib1g-dev \
-            curl \
-            autoconf \
-            automake \
-            libtool \
-            libtool-bin \
-            gettext \
-            pkg-config
+          python -m pip install --upgrade pip
+          pip install buildozer cython
 
-      - name: Set up Android SDK inside Buildozer folder
-        run: |
-          SDK_DIR=$HOME/.buildozer/android/platform/android-sdk
-          mkdir -p $SDK_DIR/cmdline-tools
-          cd $SDK_DIR/cmdline-tools
-          curl -o sdk.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip sdk.zip
-          mv cmdline-tools latest
-          ln -s $SDK_DIR/cmdline-tools/latest $SDK_DIR/tools
-          export ANDROID_SDK_ROOT=$SDK_DIR
-          export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH
-          yes | sdkmanager --licenses
-          sdkmanager "platform-tools" "platforms;android-31" "build-tools;31.0.0" "ndk;21.4.7075529"
-
-      - name: Install Python packages
-        run: |
-          pip install --upgrade pip
-          pip install cython virtualenv buildozer
+      - name: Fix missing LT_SYS_SYMBOL_USCORE by running libtoolize
+        run: libtoolize --force --copy
 
       - name: Build APK
         env:
-          ANDROIDSDK: $HOME/.buildozer/android/platform/android-sdk
-          ANDROID_SDK_ROOT: $HOME/.buildozer/android/platform/android-sdk
-          ANDROID_NDK_HOME: $HOME/.buildozer/android/platform/android-sdk/ndk/21.4.7075529
-          ANDROID_HOME: $HOME/.buildozer/android/platform/android-sdk
-          PATH: $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:$HOME/.buildozer/android/platform/android-sdk/platform-tools:/usr/bin:/usr/local/bin:$PATH
-        run: |
-          buildozer android debug
+          M4FLAGS: "-m4_pattern_allow=LT_SYS_SYMBOL_USCORE"
+        run: buildozer android debug
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: SmartLift-APK
           path: bin/*.apk
