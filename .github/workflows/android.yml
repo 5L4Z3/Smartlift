@@ -32,8 +32,13 @@ jobs:
 
       - name: Set M4FLAGS to allow LT_SYS_SYMBOL_USCORE
         run: |
-          export M4FLAGS="-m4_pattern_allow=LT_SYS_SYMBOL_USCORE"
-          echo "M4FLAGS=$M4FLAGS" >> $GITHUB_ENV
+          echo "M4FLAGS=-m4_pattern_allow=LT_SYS_SYMBOL_USCORE" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Install Android Build Tools manually
+        run: |
+          yes | $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager \
+            "build-tools;31.0.0" "platforms;android-31" "platform-tools"
         shell: bash
 
       - name: Build with Buildozer
