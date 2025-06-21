@@ -2,33 +2,34 @@ name: Build Kivy APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install tar (for GitHub checkout)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tar
-
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10.13'
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y zip unzip openjdk-17-jdk python3-pip wget
+          sudo apt install -y build-essential zip unzip openjdk-17-jdk
+          pip install buildozer
 
-          # Install Android SDK command line tools
-          sudo mkdir -p /opt/android-sdk/cmdline-tools
-          cd /opt/android-sdk/cmdline-tools
-          sudo wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
-          sudo unzip cmdline-tools.zip -d /
+      - name: Build APK
+        run: |
+          cd YOUR_PROJECT_FOLDER  # change if needed
+          buildozer android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: SmartLift-APK
+          path: YOUR_PROJECT_FOLDER/bin/*.apk
