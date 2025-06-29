@@ -59,20 +59,27 @@ jobs:
           echo "${{ github.workspace }}/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "${{ github.workspace }}/android-sdk/platform-tools" >> $GITHUB_PATH
 
-      - name: Install exact Android SDK components (no updates)
+      - name: Install required Android SDK components (no updates)
         run: |
-          sdkmanager "platform-tools" "build-tools;33.0.2" "platforms;android-33"
+          ./android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "build-tools;33.0.2" "platforms;android-33"
 
       - name: Accept Android SDK licenses after install
         run: yes | ./android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
 
-      - name: Create dummy build-tools 36 folder to prevent unwanted installs
+      - name: Check installed build-tools versions
+        run: ls -la android-sdk/build-tools/
+
+      - name: Create dummy build-tools 36 folder to prevent unwanted install
         run: mkdir -p android-sdk/build-tools/36.0.0
 
-      - name: Copy build-tools 33.0.2 to Buildozer internal SDK path
+      - name: Copy build-tools 33.0.2 to Buildozer internal SDK path (if available)
         run: |
-          mkdir -p .buildozer/android/platform/android-sdk/build-tools/33.0.2
-          cp -r android-sdk/build-tools/33.0.2/* .buildozer/android/platform/android-sdk/build-tools/33.0.2
+          if [ -d "android-sdk/build-tools/33.0.2" ]; then
+            mkdir -p .buildozer/android/platform/android-sdk/build-tools/33.0.2
+            cp -r android-sdk/build-tools/33.0.2/* .buildozer/android/platform/android-sdk/build-tools/33.0.2
+          else
+            echo "Warning: build-tools 33.0.2 not found, skipping manual copy."
+          fi
 
       - name: Clean Buildozer cache
         run: rm -rf .buildozer/.cache
