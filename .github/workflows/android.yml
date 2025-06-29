@@ -13,9 +13,9 @@ jobs:
     env:
       ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
       ANDROID_NDK_ROOT: ${{ github.workspace }}/android-sdk/ndk/25b
+      P4A_SKIP_SDK_INSTALL: 1
       BUILDOZER_ANDROID_NDK_VERSION: 25b
       ANDROIDSDK_BUILD_TOOLS_VERSION: 33.0.2
-      P4A_SKIP_SDK_INSTALL: 1
       ANDROID_GRADLE_PLUGIN_VERSION: 7.4.2
 
     steps:
@@ -59,23 +59,20 @@ jobs:
           echo "${{ github.workspace }}/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "${{ github.workspace }}/android-sdk/platform-tools" >> $GITHUB_PATH
 
-      - name: Accept Android SDK licenses
-        run: yes | ./android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
-
-      - name: Install exact Android SDK components (no update)
+      - name: Install exact Android SDK components (no updates)
         run: |
           sdkmanager "platform-tools" "build-tools;33.0.2" "platforms;android-33"
 
-      - name: Remove all build-tools except 33.0.2, add dummy 36.0.0 folder to avoid install attempts
-        run: |
-          rm -rf android-sdk/build-tools/*
-          mkdir -p android-sdk/build-tools/33.0.2
-          mkdir -p android-sdk/build-tools/36.0.0
+      - name: Accept Android SDK licenses after install
+        run: yes | ./android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
 
-      - name: Copy build-tools 33.0.2 to Buildozer path
+      - name: Create dummy build-tools 36 folder to prevent unwanted installs
+        run: mkdir -p android-sdk/build-tools/36.0.0
+
+      - name: Copy build-tools 33.0.2 to Buildozer internal SDK path
         run: |
           mkdir -p .buildozer/android/platform/android-sdk/build-tools/33.0.2
-          cp -r android-sdk/build-tools/33.0.2/* .buildozer/android/platform/android-sdk/build-tools/33.0.2 || true
+          cp -r android-sdk/build-tools/33.0.2/* .buildozer/android/platform/android-sdk/build-tools/33.0.2
 
       - name: Clean Buildozer cache
         run: rm -rf .buildozer/.cache
