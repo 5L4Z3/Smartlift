@@ -17,7 +17,6 @@ android.ndk_api = 21
 
 android.ignore_sdk_update = 1
 
-# Optional, pin Gradle plugin version to avoid incompatibility:
 android.gradle_dependencies = com.android.tools.build:gradle:7.4.2
 
 [buildozer]
