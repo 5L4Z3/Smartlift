@@ -32,6 +32,12 @@ jobs:
           sudo apt update
           sudo apt install -y unzip openjdk-17-jdk wget python3-pip python3-setuptools python3-wheel python3-virtualenv libffi-dev libssl-dev libsqlite3-dev libjpeg-dev libfreetype6-dev zlib1g-dev build-essential libgl1-mesa-dev
 
+      - name: Install Apache Ant
+        run: |
+          wget https://archive.apache.org/dist/ant/binaries/apache-ant-1.9.4-bin.tar.gz
+          tar -xzf apache-ant-1.9.4-bin.tar.gz
+          echo "${{ github.workspace }}/apache-ant-1.9.4/bin" >> $GITHUB_PATH
+
       - name: Install Buildozer and Cython
         run: |
           pip install --upgrade pip
