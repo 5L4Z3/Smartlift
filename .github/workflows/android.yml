@@ -16,6 +16,7 @@ jobs:
       BUILDOZER_ANDROID_NDK_VERSION: 25b
       ANDROIDSDK_BUILD_TOOLS_VERSION: 33.0.2
       P4A_SKIP_SDK_INSTALL: 1
+      ANDROID_GRADLE_PLUGIN_VERSION: 7.4.2
 
     steps:
       - name: Checkout repository
@@ -61,11 +62,26 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | ./android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
 
-      - name: Install Android SDK components
-        run: sdkmanager "platform-tools" "build-tools;33.0.2" "platforms;android-33"
+      - name: Install exact Android SDK components (no update)
+        run: |
+          sdkmanager "platform-tools" "build-tools;33.0.2" "platforms;android-33"
 
-      - name: Build APK with Buildozer
-        run: buildozer android debug --verbose
+      - name: Remove all build-tools except 33.0.2, add dummy 36.0.0 folder to avoid install attempts
+        run: |
+          rm -rf android-sdk/build-tools/*
+          mkdir -p android-sdk/build-tools/33.0.2
+          mkdir -p android-sdk/build-tools/36.0.0
+
+      - name: Copy build-tools 33.0.2 to Buildozer path
+        run: |
+          mkdir -p .buildozer/android/platform/android-sdk/build-tools/33.0.2
+          cp -r android-sdk/build-tools/33.0.2/* .buildozer/android/platform/android-sdk/build-tools/33.0.2 || true
+
+      - name: Clean Buildozer cache
+        run: rm -rf .buildozer/.cache
+
+      - name: Build APK (no SDK updates)
+        run: buildozer android debug --no-update
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
