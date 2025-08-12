@@ -111,27 +111,28 @@ jobs:
 
       - name: Start p4a build with libffi patch
         run: |
-          # Start a background job to patch libffi as soon as it's created
+          # Background job: wait for libffi recipe and patch it
           (
-            echo "Waiting for libffi recipe to be created..."
-            while [ ! -d "$HOME/.local/share/python-for-android/recipes/libffi" ]; do
+            echo "⏳ Waiting for libffi recipe to be created..."
+            until [ -d "$HOME/.local/share/python-for-android/recipes/libffi" ]; do
               sleep 5
             done
-            echo "✅ libffi found! Applying patch..."
+            echo "✅ libffi recipe found! Patching..."
 
-            # Patch libffi to skip LT_SYS_SYMBOL_USCORE
+            # Patch the recipe to skip LT_SYS_SYMBOL_USCORE
             sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' \
               "$HOME/.local/share/python-for-android/recipes/libffi/__init__.py"
+
             sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' \
               "$HOME/.local/share/python-for-android/recipes/libffi/__init__.py"
 
-            echo "✅ libffi patched successfully"
+            echo "✅ libffi recipe patched successfully"
           ) &
 
-          # Give the watcher time to start
+          # Give the background job time to start
           sleep 5
 
-          # Now run p4a
+          # Run the actual build
           p4a apk \
             --private . \
             --package=org.example.smartlift \
