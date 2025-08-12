@@ -1,13 +1,15 @@
-# .github/workflows/android.yml
 name: Build Android APK
+
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
       ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
       ANDROID_NDK_ROOT: ${{ github.workspace }}/android-sdk/ndk/24
@@ -16,7 +18,8 @@ jobs:
       ANDROIDSDK_BUILD_TOOLS_VERSION: 33.0.2
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
       - name: Setup Python 3.10
         uses: actions/setup-python@v4
@@ -26,7 +29,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt update
-          sudo apt install -y unzip openjdk-17-jdk wget python3-pip python3-setuptools libffi-dev libssl-dev libsqlite3-dev libjpeg-dev libfreetype6-dev zlib1g-dev build-essential libgl1-mesa-dev
+          sudo apt install -y unzip openjdk-17-jdk wget python3-pip python3-setuptools python3-wheel libffi-dev libssl-dev libsqlite3-dev libjpeg-dev libfreetype6-dev zlib1g-dev build-essential libgl1-mesa-dev
 
       - name: Install Apache Ant
         run: |
@@ -40,15 +43,17 @@ jobs:
           pip install Cython==0.29.33
           pip install buildozer --upgrade
 
-      - name: Download Android SDK
+      - name: Download Android SDK Command-line Tools
         run: |
-          mkdir -p android-sdk/cmdline-tools/latest
-          cd android-sdk/cmdline-tools/latest
+          mkdir -p android-sdk/cmdline-tools
+          cd android-sdk/cmdline-tools
           wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
           unzip -q commandlinetools-linux-9477386_latest.zip
+          mv cmdline-tools/latest .
+          rm -rf cmdline-tools
           rm -f commandlinetools-linux-9477386_latest.zip
 
-      - name: Download NDK r24
+      - name: Download Android NDK r24
         run: |
           mkdir -p android-sdk/ndk
           cd android-sdk/ndk
@@ -62,15 +67,15 @@ jobs:
           echo "${{ github.workspace }}/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "${{ github.workspace }}/android-sdk/platform-tools" >> $GITHUB_PATH
 
-      - name: Accept licenses and install SDK
+      - name: Accept licenses and install SDK components
         run: |
           yes | ./android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=${{ github.workspace }}/android-sdk --licenses
           ./android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=${{ github.workspace }}/android-sdk "platform-tools" "platforms;android-33" "build-tools;33.0.2"
 
-      - name: Build APK
+      - name: Build APK (no SDK update)
         run: buildozer android debug --no-update
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: SmartLift-APK
