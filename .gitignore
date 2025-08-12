@@ -11,15 +11,7 @@ __pycache__/
 .Python
 env/
 venv/
-pip-selfcheck.json
 
-# OS & Editor
+# OS
 .DS_Store
 Thumbs.db
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Kivy
-.cache/
