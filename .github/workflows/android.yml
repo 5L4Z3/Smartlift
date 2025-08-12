@@ -110,12 +110,19 @@ jobs:
             exit 1
           fi
 
-      - name: Upgrade autoconf and libtool (fix libffi build)
+      - name: Patch libffi to fix LT_SYS_SYMBOL_USCORE error
         run: |
-          sudo apt update -qq
-          sudo apt install -y automake autoconf libtool m4
-          sudo rm -f /usr/bin/libtool
-          sudo ln -s /usr/bin/libtoolize /usr/bin/libtool
+          LIBFFI_DIR="$HOME/.local/share/python-for-android/recipes/libffi"
+          if [ ! -d "$LIBFFI_DIR" ]; then
+            echo "❌ libffi recipe not found! p4a may not be installed correctly."
+            exit 1
+          fi
+
+          cp "$LIBFFI_DIR/__init__.py" "$LIBFFI_DIR/__init__.py.bak"
+          sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' "$LIBFFI_DIR/__init__.py"
+          sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' "$LIBFFI_DIR/__init__.py"
+
+          echo "✅ libffi recipe patched successfully"
 
       - name: Build APK with p4a directly
         run: |
