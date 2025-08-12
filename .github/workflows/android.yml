@@ -1,26 +1,22 @@
+# .github/workflows/android.yml
 name: Build Android APK
-
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     env:
       ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
-      ANDROID_NDK_ROOT: ${{ github.workspace }}/android-sdk/ndk/25b
+      ANDROID_NDK_ROOT: ${{ github.workspace }}/android-sdk/ndk/24
       P4A_SKIP_SDK_INSTALL: 1
-      BUILDOZER_ANDROID_NDK_VERSION: 25b
+      BUILDOZER_ANDROID_NDK_VERSION: 24
       ANDROIDSDK_BUILD_TOOLS_VERSION: 33.0.2
-      ANDROID_GRADLE_PLUGIN_VERSION: 7.4.2
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Setup Python 3.10
         uses: actions/setup-python@v4
@@ -30,7 +26,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt update
-          sudo apt install -y unzip openjdk-17-jdk wget python3-pip python3-setuptools python3-wheel python3-virtualenv libffi-dev libssl-dev libsqlite3-dev libjpeg-dev libfreetype6-dev zlib1g-dev build-essential libgl1-mesa-dev
+          sudo apt install -y unzip openjdk-17-jdk wget python3-pip python3-setuptools libffi-dev libssl-dev libsqlite3-dev libjpeg-dev libfreetype6-dev zlib1g-dev build-essential libgl1-mesa-dev
 
       - name: Install Apache Ant
         run: |
@@ -38,61 +34,43 @@ jobs:
           tar -xzf apache-ant-1.9.4-bin.tar.gz
           echo "${{ github.workspace }}/apache-ant-1.9.4/bin" >> $GITHUB_PATH
 
-      - name: Install Buildozer and Cython
+      - name: Install Cython and Buildozer
         run: |
           pip install --upgrade pip
-          pip install Cython buildozer==1.5.0
+          pip install Cython==0.29.33
+          pip install buildozer --upgrade
 
-      - name: Download Android SDK Command-line Tools
+      - name: Download Android SDK
         run: |
-          mkdir -p android-sdk/cmdline-tools
-          cd android-sdk/cmdline-tools
-          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
-          unzip -q cmdline-tools.zip
-          rm cmdline-tools.zip
-          mv cmdline-tools latest
+          mkdir -p android-sdk/cmdline-tools/latest
+          cd android-sdk/cmdline-tools/latest
+          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip -q commandlinetools-linux-9477386_latest.zip
+          rm -f commandlinetools-linux-9477386_latest.zip
 
-      - name: Download Android NDK 25b
+      - name: Download NDK r24
         run: |
           mkdir -p android-sdk/ndk
           cd android-sdk/ndk
-          wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip -O android-ndk.zip
-          unzip -q android-ndk.zip
-          rm android-ndk.zip
+          wget https://dl.google.com/android/repository/android-ndk-r24-linux.zip -O ndk.zip
+          unzip -q ndk.zip
+          mv android-ndk-r24 24
+          rm ndk.zip
 
-      - name: Add Android SDK tools to PATH
+      - name: Add SDK tools to PATH
         run: |
           echo "${{ github.workspace }}/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "${{ github.workspace }}/android-sdk/platform-tools" >> $GITHUB_PATH
 
-      - name: Install required Android SDK components (build-tools 33.0.2 only)
+      - name: Accept licenses and install SDK
         run: |
-          mkdir -p android-sdk/build-tools
-          ./android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=${{ github.workspace }}/android-sdk "platform-tools" "platforms;android-33" "build-tools;33.0.2"
           yes | ./android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=${{ github.workspace }}/android-sdk --licenses
+          ./android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=${{ github.workspace }}/android-sdk "platform-tools" "platforms;android-33" "build-tools;33.0.2"
 
-      - name: Check installed build-tools versions
-        run: ls -la android-sdk/build-tools/
-
-      - name: Create dummy build-tools 36 folder to prevent unwanted install
-        run: mkdir -p android-sdk/build-tools/36.0.0
-
-      - name: Copy build-tools 33.0.2 to Buildozer internal SDK path (if available)
-        run: |
-          if [ -d "android-sdk/build-tools/33.0.2" ]; then
-            mkdir -p .buildozer/android/platform/android-sdk/build-tools/33.0.2
-            cp -r android-sdk/build-tools/33.0.2/* .buildozer/android/platform/android-sdk/build-tools/33.0.2
-          else
-            echo "Warning: build-tools 33.0.2 not found, skipping manual copy."
-          fi
-
-      - name: Clean Buildozer cache
-        run: rm -rf .buildozer/.cache
-
-      - name: Build APK (no SDK updates)
+      - name: Build APK
         run: buildozer android debug --no-update
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: SmartLift-APK
