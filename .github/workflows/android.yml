@@ -12,7 +12,7 @@ jobs:
 
     env:
       ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
-      ANDROID_NDK_ROOT: ${{ github.workspace }}/android-sdk/ndk/24
+      ANDROID_NDK_ROOT: ${{ github.workspace }}/android-sdk/ndk/27.2.12479018
       ANDROID_API: 33
       NDK_API: 21
       ANDROID_BUILD_TOOLS: 33.0.2
@@ -94,6 +94,22 @@ jobs:
             "platform-tools" \
             "platforms;android-33" \
             "build-tools;33.0.2"
+
+      - name: Download Android NDK r27c (LTS)
+        if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
+        run: |
+          mkdir -p ${{ github.workspace }}/android-sdk/ndk
+          cd ${{ github.workspace }}/android-sdk/ndk
+          wget https://dl.google.com/android/repository/android-ndk-r27c-linux.zip -O ndk.zip
+          unzip -q ndk.zip
+          mv android-ndk-r27c 27.2.12479018
+          rm ndk.zip
+
+          # Verify NDK version file exists
+          if [ ! -f "27.2.12479018/source.properties" ]; then
+            echo "❌ NDK source.properties not found!"
+            exit 1
+          fi
 
       - name: Build APK with p4a directly
         run: |
