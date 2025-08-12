@@ -9,127 +9,35 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: kivy/buildozer:latest
+      options: --user root
 
     env:
-      ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
-      ANDROID_NDK_ROOT: ${{ github.workspace }}/android-sdk/ndk/27.2.12479018
+      ANDROID_SDK_ROOT: /home/buildozer/.buildozer/android/platform/android-sdk
+      ANDROID_NDK_ROOT: /home/buildozer/.buildozer/android/platform/android-ndk
       ANDROID_API: 33
       NDK_API: 21
-      ANDROID_BUILD_TOOLS: 33.0.2
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Cache SDK & NDK
-        uses: actions/cache@v3
-        id: cache-sdk
-        with:
-          path: |
-            android-sdk
-            .p4a
-          key: android-sdk-${{ hashFiles('buildozer.spec') }}
-          restore-keys: android-sdk-
-
-      - name: Setup Python 3.10
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
-
-      - name: Install system dependencies
+      - name: Copy project into container
         run: |
-          sudo apt update -qq
-          sudo apt install -y \
-            unzip \
-            openjdk-17-jdk \
-            wget \
-            python3-pip \
-            libffi-dev \
-            libssl-dev \
-            libsqlite3-dev \
-            libjpeg-dev \
-            zlib1g-dev \
-            build-essential \
-            libgl1-mesa-dev
+          mkdir -p /home/buildozer/project
+          cp -r ./* /home/buildozer/project/
+          chown -R buildozer:buildozer /home/buildozer/project
+          cd /home/buildozer/project
 
-      - name: Install Apache Ant
+      - name: Switch to buildozer user
         run: |
-          wget https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.13-bin.tar.gz
-          tar -xzf apache-ant-1.10.13-bin.tar.gz
-          echo "${{ github.workspace }}/apache-ant-1.10.13/bin" >> $GITHUB_PATH
+          sudo -u buildozer mkdir -p /home/buildozer/project/.buildozer
 
-      - name: Install Cython and p4a
+      - name: Build APK with p4a
         run: |
-          pip install --upgrade pip
-          pip install Cython==0.29.33
-          pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
-
-      - name: Download Android SDK Command-line Tools
-        if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
-        run: |
-          mkdir -p android-sdk/cmdline-tools
-          cd android-sdk/cmdline-tools
-          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip -q commandlinetools-linux-9477386_latest.zip
-          mkdir -p latest
-          mv cmdline-tools/* latest/
-          rmdir cmdline-tools
-          rm -f commandlinetools-linux-9477386_latest.zip
-
-      - name: Add SDK tools to PATH
-        run: |
-          echo "${{ github.workspace }}/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          echo "${{ github.workspace }}/android-sdk/platform-tools" >> $GITHUB_PATH
-
-      - name: Accept licenses
-        run: |
-          mkdir -p $ANDROID_SDK_ROOT/licenses
-          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_SDK_ROOT/licenses/android-sdk-license
-          echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_SDK_ROOT/licenses/android-sdk-license
-
-      - name: Install SDK Components
-        if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
-        run: |
-          sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
-            "platform-tools" \
-            "platforms;android-33" \
-            "build-tools;33.0.2"
-
-      - name: Download Android NDK r27c (LTS)
-        if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
-        run: |
-          mkdir -p ${{ github.workspace }}/android-sdk/ndk
-          cd ${{ github.workspace }}/android-sdk/ndk
-          wget https://dl.google.com/android/repository/android-ndk-r27c-linux.zip -O ndk.zip
-          unzip -q ndk.zip
-          mv android-ndk-r27c 27.2.12479018
-          rm ndk.zip
-
-          if [ ! -f "27.2.12479018/source.properties" ]; then
-            echo "❌ NDK source.properties not found!"
-            exit 1
-          fi
-
-      - name: Patch libffi to fix LT_SYS_SYMBOL_USCORE error
-        run: |
-          LIBFFI_DIR="$HOME/.local/share/python-for-android/recipes/libffi"
-          if [ ! -d "$LIBFFI_DIR" ]; then
-            echo "❌ libffi recipe not found! p4a may not be installed correctly."
-            exit 1
-          fi
-
-          cp "$LIBFFI_DIR/__init__.py" "$LIBFFI_DIR/__init__.py.bak"
-          sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' "$LIBFFI_DIR/__init__.py"
-          sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' "$LIBFFI_DIR/__init__.py"
-
-          echo "✅ libffi recipe patched successfully"
-
-      - name: Build APK with p4a directly
-        run: |
-          export P4A_HOME="$HOME/.p4a"
-          mkdir -p $P4A_HOME
-
-          p4a apk \
+          cd /home/buildozer/project
+          sudo -u buildozer python -m pythonforandroid.toolchain apk \
             --private . \
             --package=org.example.smartlift \
             --name="SmartLift" \
@@ -141,8 +49,6 @@ jobs:
             --dist-name=smartlift \
             --android-api=$ANDROID_API \
             --ndk-api=$NDK_API \
-            --sdk-dir=$ANDROID_SDK_ROOT \
-            --ndk-dir=$ANDROID_NDK_ROOT \
             --whitelist=whitelist.txt \
             --presplash=Preplash.png \
             --icon=Icon.png \
@@ -153,8 +59,15 @@ jobs:
             --color=always
 
       - name: Upload APK
+        run: |
+          cp /home/buildozer/project/dist/smartlift/*.apk /github/workspace/ || true
+        continue-on-error: true
+
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: SmartLift-APK
-          path: dist/smartlift/*.apk
+          path: |
+            *.apk
+            !venv/
           if-no-files-found: error
