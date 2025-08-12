@@ -13,7 +13,7 @@ source.main.py = main.py
 source.include_exts = py,png,jpg,jpeg,kv,atlas,mp3
 source.exclude_dirs = tests, bin
 
-# Requirements (pin versions for reproducibility)
+# Requirements
 requirements = python3==3.10.12,kivy==2.2.1,setuptools,sdl2,pillow
 
 # Android settings
@@ -21,8 +21,9 @@ orientation = portrait
 android.permissions = INTERNET
 android.api = 33
 android.minapi = 21
+android.sdk_build_tools = 33.0.2
 android.build_tools = 33.0.2
-android.ndk = 24
+android.ndk = 27.2.12479018  # ← Must match NDK version exactly
 android.archs = arm64-v8a
 
 # Assets
