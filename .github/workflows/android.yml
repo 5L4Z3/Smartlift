@@ -29,6 +29,7 @@ jobs:
             android-sdk
             .p4a
           key: android-sdk-${{ hashFiles('buildozer.spec') }}
+          restore-keys: android-sdk-
 
       - name: Setup Python 3.10
         uses: actions/setup-python@v4
@@ -64,7 +65,7 @@ jobs:
           pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
 
       - name: Download Android SDK (if not cached)
-        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
         run: |
           mkdir -p android-sdk/cmdline-tools
           cd android-sdk/cmdline-tools
@@ -74,7 +75,7 @@ jobs:
           rm -f commandlinetools-linux-9477386_latest.zip
 
       - name: Download Android NDK r24 (if not cached)
-        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
         run: |
           mkdir -p android-sdk/ndk
           cd android-sdk/ndk
@@ -90,7 +91,7 @@ jobs:
           echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_SDK_ROOT/licenses/android-sdk-license
 
       - name: Install SDK components
-        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
         run: |
           sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
             "platform-tools" \
@@ -99,7 +100,6 @@ jobs:
 
       - name: Build APK with p4a directly
         run: |
-          # Set p4a home to cache
           export P4A_HOME="$HOME/.p4a"
           mkdir -p $P4A_HOME
 
@@ -122,14 +122,13 @@ jobs:
             --icon=Icon.png \
             --orientation=portrait \
             --permission=INTERNET \
-            --release \
-            --keystore=$KEYSTORE_PATH \
-            --signer-name=$KEY_ALIAS \
             --wakelock \
+            --release \
             --color=always
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: SmartLift-APK
-          path: *.apk
+          path: dist/smartlift/*.apk
+          if-no-files-found: error
