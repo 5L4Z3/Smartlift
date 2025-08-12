@@ -21,6 +21,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Cache Android SDK & Buildozer
+        uses: actions/cache@v3
+        with:
+          path: |
+            android-sdk
+            .buildozer
+          key: android-sdk-${{ hashFiles('buildozer.spec') }}
+
       - name: Setup Python 3.10
         uses: actions/setup-python@v4
         with:
@@ -44,6 +52,7 @@ jobs:
           pip install buildozer --upgrade
 
       - name: Download Android SDK Command-line Tools
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p android-sdk/cmdline-tools
           cd android-sdk/cmdline-tools
@@ -53,6 +62,7 @@ jobs:
           rm -f commandlinetools-linux-9477386_latest.zip
 
       - name: Download Android NDK r24
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p android-sdk/ndk
           cd android-sdk/ndk
@@ -73,14 +83,21 @@ jobs:
           echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_SDK_ROOT/licenses/android-sdk-license
 
       - name: Install SDK Components
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           sdkmanager --sdk_root=$ANDROID_SDK_ROOT "platform-tools" "platforms;android-33" "build-tools;33.0.2"
 
-      - name: Debug - List Files
-        run: ls -la
+      - name: Build APK (offline mode)
+        run: |
+          export P4A_SKIP_BOOTSTRAP_BUILD=True
+          export P4A_SKIP_PYTHON_INSTALL=True
+          export P4A_SKIP_SOURCE_CHECK=True
+          export ANDROIDSDK="${{ github.workspace }}/android-sdk"
+          export ANDROIDNDK="${{ github.workspace }}/android-sdk/ndk/24"
+          export ANDROIDAPI="33"
+          export NDKAPI="24"
 
-      - name: Build APK (no update)
-        run: buildozer android debug --no-update
+          buildozer android debug --no-update --no-color
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
