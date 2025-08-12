@@ -10,14 +10,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: kivy/buildozer:latest
+      image: mobileshepherd/python-for-android:latest
       options: --user root
-
-    env:
-      ANDROID_SDK_ROOT: /home/buildozer/.buildozer/android/platform/android-sdk
-      ANDROID_NDK_ROOT: /home/buildozer/.buildozer/android/platform/android-ndk
-      ANDROID_API: 33
-      NDK_API: 21
 
     steps:
       - name: Checkout repository
@@ -25,19 +19,15 @@ jobs:
 
       - name: Copy project into container
         run: |
-          mkdir -p /home/buildozer/project
-          cp -r ./* /home/buildozer/project/
-          chown -R buildozer:buildozer /home/buildozer/project
-          cd /home/buildozer/project
-
-      - name: Switch to buildozer user
-        run: |
-          sudo -u buildozer mkdir -p /home/buildozer/project/.buildozer
+          mkdir -p /home/builder/project
+          cp -r ./* /home/builder/project/
+          chown -R builder:builder /home/builder/project
+          cd /home/builder/project
 
       - name: Build APK with p4a
         run: |
-          cd /home/buildozer/project
-          sudo -u buildozer python -m pythonforandroid.toolchain apk \
+          cd /home/builder/project
+          sudo -u builder python -m pythonforandroid.toolchain apk \
             --private . \
             --package=org.example.smartlift \
             --name="SmartLift" \
@@ -47,8 +37,8 @@ jobs:
             --arch=arm64-v8a \
             --copy-libs \
             --dist-name=smartlift \
-            --android-api=$ANDROID_API \
-            --ndk-api=$NDK_API \
+            --android-api=33 \
+            --ndk-api=21 \
             --whitelist=whitelist.txt \
             --presplash=Preplash.png \
             --icon=Icon.png \
@@ -60,8 +50,7 @@ jobs:
 
       - name: Upload APK
         run: |
-          cp /home/buildozer/project/dist/smartlift/*.apk /github/workspace/ || true
-        continue-on-error: true
+          cp /home/builder/project/dist/smartlift/*.apk /github/workspace/ || true
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
