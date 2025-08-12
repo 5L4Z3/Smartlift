@@ -109,36 +109,44 @@ jobs:
           mv android-ndk-r27c 27.2.12479018
           rm ndk.zip
 
-      - name: Start build to trigger recipe download
+      - name: Trigger recipe download
         run: |
-          # Run p4a in dry mode to force recipe download
-          echo "Running p4a to trigger recipe download..."
-          p4a apk \
-            --private . \
-            --package=org.example.smartlift \
-            --name="SmartLift" \
-            --version=1.0 \
-            --bootstrap=sdl2 \
-            --requirements=python3,kivy==2.2.1,pillow,sdl2 \
-            --arch=arm64-v8a \
-            --dist-name=smartlift \
-            --android-api=$ANDROID_API \
-            --ndk-api=$NDK_API \
-            --sdk-dir=$ANDROID_SDK_ROOT \
-            --ndk-dir=$ANDROID_NDK_ROOT \
-            --whitelist=whitelist.txt \
-            --presplash=Preplash.png \
-            --icon=Icon.png \
-            --release \
-            --color=always \
-            --debug || true
+          # Start p4a in background
+          (
+            echo "⏳ Starting p4a to trigger recipe download..."
+            p4a apk \
+              --private . \
+              --package=org.example.smartlift \
+              --name="SmartLift" \
+              --version=1.0 \
+              --bootstrap=sdl2 \
+              --requirements=python3,kivy==2.2.1,pillow,sdl2 \
+              --arch=arm64-v8a \
+              --dist-name=smartlift \
+              --android-api=$ANDROID_API \
+              --ndk-api=$NDK_API \
+              --sdk-dir=$ANDROID_SDK_ROOT \
+              --ndk-dir=$ANDROID_NDK_ROOT \
+              --whitelist=whitelist.txt \
+              --presplash=Preplash.png \
+              --icon=Icon.png \
+              --release \
+              --color=always \
+              --debug
+          ) &
+          
+          # Wait for recipes to be created
+          sleep 60
+          
+          # Kill any hanging p4a process
+          pkill -f "p4a" || true
 
       - name: Patch libffi recipe
         run: |
           LIBFFI_DIR="$HOME/.local/share/python-for-android/recipes/libffi"
           if [ ! -d "$LIBFFI_DIR" ]; then
-            echo "❌ libffi recipe not found after dry run!"
-            ls -la $HOME/.local/share/python-for-android/recipes/
+            echo "❌ libffi recipe not found! Listing recipes dir:"
+            ls -la $HOME/.local/share/python-for-android/recipes/ 2>/dev/null || echo "No recipes dir"
             exit 1
           fi
 
