@@ -70,18 +70,26 @@ jobs:
 
       - name: Patch libffi recipe (fix LT_SYS_SYMBOL_USCORE)
         run: |
-          # Find the installed libffi recipe
-          LIBFFI_RECIPE="$HOME/.local/lib/python3.10/site-packages/pythonforandroid/recipes/libffi/__init__.py"
+          # Find the actual location of the pythonforandroid package
+          P4A_DIR=$(python -c "import pythonforandroid; print(pythonforandroid.__file__.replace('__init__.py', ''))")
+          echo "✅ Found pythonforandroid at: $P4A_DIR"
+
+          LIBFFI_RECIPE="$P4A_DIR/recipes/libffi/__init__.py"
+          
           if [ ! -f "$LIBFFI_RECIPE" ]; then
             echo "❌ libffi recipe not found at $LIBFFI_RECIPE"
-            ls -la $HOME/.local/lib/python3.10/site-packages/pythonforandroid/recipes/ || true
+            echo "❌ Checking directory structure..."
+            ls -la $(dirname $P4A_DIR/recipes/libffi)
             exit 1
           fi
 
           echo "✅ Patching libffi recipe at $LIBFFI_RECIPE"
+          
+          # Apply the patch to skip the problematic macro
           sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' "$LIBFFI_RECIPE"
           sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' "$LIBFFI_RECIPE"
-          echo "✅ libffi recipe patched successfully"
+          
+          echo "✅ libffi recipe patched successfully!"
 
       - name: Download Android SDK Command-line Tools
         if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
