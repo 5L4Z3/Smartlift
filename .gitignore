@@ -1,17 +1,11 @@
-# Buildozer
-.buildozer/
-bin/
-*.apk
-
-# Python
+# Build
+.p4a/
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
+
+# APKs
+*.apk
+bin/
 
 # OS
 .DS_Store
-Thumbs.db
