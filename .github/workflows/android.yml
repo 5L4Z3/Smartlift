@@ -105,11 +105,17 @@ jobs:
           mv android-ndk-r27c 27.2.12479018
           rm ndk.zip
 
-          # Verify NDK version file exists
           if [ ! -f "27.2.12479018/source.properties" ]; then
             echo "❌ NDK source.properties not found!"
             exit 1
           fi
+
+      - name: Upgrade autoconf and libtool (fix libffi build)
+        run: |
+          sudo apt update -qq
+          sudo apt install -y automake autoconf libtool m4
+          sudo rm -f /usr/bin/libtool
+          sudo ln -s /usr/bin/libtoolize /usr/bin/libtool
 
       - name: Build APK with p4a directly
         run: |
