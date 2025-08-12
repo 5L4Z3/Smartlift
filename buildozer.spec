@@ -1,47 +1,35 @@
 [app]
 
-# App metadata
 title = SmartLift
 package.name = smartlift
 package.domain = org.example
 version = 1.0
 name = SmartLift
 
-# Source configuration
 source.dir = .
 source.main.py = main.py
-source.include_exts = py,png,jpg,jpeg,kv,atlas
+source.include_exts = py,png,jpg,jpeg,kv,atlas,mp3
 source.exclude_dirs = tests, bin
 
-# Kivy Requirements (stable versions for reproducible CI)
 requirements = python3==3.10.12,kivy==2.2.1,setuptools,sdl2,pillow
 
-# Android settings
 orientation = portrait
 android.permissions = INTERNET
 android.api = 33
 android.minapi = 21
 android.sdk_build_tools = 33.0.2
-android.ndk = r24
-
-# Optimize for arm64 (faster CI, smaller APK)
+android.ndk = 24
 android.archs = arm64-v8a
 
-# Icon and splash (exact case-sensitive names)
 icon.filename = %(source.dir)s/Icon.png
 presplash.filename = %(source.dir)s/Preplash.png
 
-# Bootstrap
 p4a.bootstrap = sdl2
-
-# App settings
 android.allow_backup = true
 android.fullscreen = 1
 
-# Buildozer settings
 buildozer.build_log = 1
 buildozer.target = android
-
 
 [buildozer]
 
