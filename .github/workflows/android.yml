@@ -68,6 +68,21 @@ jobs:
           pip install Cython==0.29.33
           pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
 
+      - name: Patch libffi recipe (fix LT_SYS_SYMBOL_USCORE)
+        run: |
+          # Find the installed libffi recipe
+          LIBFFI_RECIPE="$HOME/.local/lib/python3.10/site-packages/pythonforandroid/recipes/libffi/__init__.py"
+          if [ ! -f "$LIBFFI_RECIPE" ]; then
+            echo "❌ libffi recipe not found at $LIBFFI_RECIPE"
+            ls -la $HOME/.local/lib/python3.10/site-packages/pythonforandroid/recipes/ || true
+            exit 1
+          fi
+
+          echo "✅ Patching libffi recipe at $LIBFFI_RECIPE"
+          sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' "$LIBFFI_RECIPE"
+          sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' "$LIBFFI_RECIPE"
+          echo "✅ libffi recipe patched successfully"
+
       - name: Download Android SDK Command-line Tools
         if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
         run: |
@@ -109,53 +124,7 @@ jobs:
           mv android-ndk-r27c 27.2.12479018
           rm ndk.zip
 
-      - name: Trigger recipe download
-        run: |
-          # Start p4a in background
-          (
-            echo "⏳ Starting p4a to trigger recipe download..."
-            p4a apk \
-              --private . \
-              --package=org.example.smartlift \
-              --name="SmartLift" \
-              --version=1.0 \
-              --bootstrap=sdl2 \
-              --requirements=python3,kivy==2.2.1,pillow,sdl2 \
-              --arch=arm64-v8a \
-              --dist-name=smartlift \
-              --android-api=$ANDROID_API \
-              --ndk-api=$NDK_API \
-              --sdk-dir=$ANDROID_SDK_ROOT \
-              --ndk-dir=$ANDROID_NDK_ROOT \
-              --whitelist=whitelist.txt \
-              --presplash=Preplash.png \
-              --icon=Icon.png \
-              --release \
-              --color=always \
-              --debug
-          ) &
-          
-          # Wait for recipes to be created
-          sleep 60
-          
-          # Kill any hanging p4a process
-          pkill -f "p4a" || true
-
-      - name: Patch libffi recipe
-        run: |
-          LIBFFI_DIR="$HOME/.local/share/python-for-android/recipes/libffi"
-          if [ ! -d "$LIBFFI_DIR" ]; then
-            echo "❌ libffi recipe not found! Listing recipes dir:"
-            ls -la $HOME/.local/share/python-for-android/recipes/ 2>/dev/null || echo "No recipes dir"
-            exit 1
-          fi
-
-          echo "✅ Patching libffi recipe..."
-          sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' "$LIBFFI_DIR/__init__.py"
-          sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' "$LIBFFI_DIR/__init__.py"
-          echo "✅ libffi recipe patched successfully"
-
-      - name: Build APK (final)
+      - name: Build APK with p4a directly
         run: |
           p4a apk \
             --private . \
