@@ -68,6 +68,23 @@ jobs:
           pip install Cython==0.29.33
           pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
 
+      - name: Patch libffi recipe to fix LT_SYS_SYMBOL_USCORE
+        run: |
+          # Wait a moment for p4a to settle
+          sleep 2
+
+          LIBFFI_DIR="$HOME/.local/share/python-for-android/recipes/libffi"
+          if [ ! -d "$LIBFFI_DIR" ]; then
+            echo "❌ libffi recipe not found after p4a install!"
+            exit 1
+          fi
+
+          echo "✅ Patching libffi recipe..."
+          sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' "$LIBFFI_DIR/__init__.py"
+          sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' "$LIBFFI_DIR/__init__.py"
+
+          echo "✅ libffi recipe patched successfully"
+
       - name: Download Android SDK Command-line Tools
         if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
         run: |
@@ -109,30 +126,8 @@ jobs:
           mv android-ndk-r27c 27.2.12479018
           rm ndk.zip
 
-      - name: Start p4a build with libffi patch
+      - name: Build APK with p4a directly
         run: |
-          # Background job: wait for libffi recipe and patch it
-          (
-            echo "⏳ Waiting for libffi recipe to be created..."
-            until [ -d "$HOME/.local/share/python-for-android/recipes/libffi" ]; do
-              sleep 5
-            done
-            echo "✅ libffi recipe found! Patching..."
-
-            # Patch the recipe to skip LT_SYS_SYMBOL_USCORE
-            sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' \
-              "$HOME/.local/share/python-for-android/recipes/libffi/__init__.py"
-
-            sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' \
-              "$HOME/.local/share/python-for-android/recipes/libffi/__init__.py"
-
-            echo "✅ libffi recipe patched successfully"
-          ) &
-
-          # Give the background job time to start
-          sleep 5
-
-          # Run the actual build
           p4a apk \
             --private . \
             --package=org.example.smartlift \
