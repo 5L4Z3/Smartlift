@@ -1,0 +1,6 @@
+*.py
+*.png
+*.jpg
+*.jpeg
+*.mp3
+*.kv
