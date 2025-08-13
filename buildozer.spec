@@ -1,9 +1,11 @@
 [app]
+
 title = SmartLift
 package.name = smartlift
 package.domain = org.example
 version = 1.0
 source.dir = .
+source.main.py = main.py
 source.include_exts = py,png,jpg,jpeg,kv,atlas,mp3
 requirements = python3,kivy,pillow,sdl2
 orientation = portrait
