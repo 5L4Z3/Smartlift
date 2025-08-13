@@ -78,7 +78,6 @@ jobs:
           
           if [ ! -f "$LIBFFI_RECIPE" ]; then
             echo "❌ libffi recipe not found at $LIBFFI_RECIPE"
-            echo "❌ Checking directory structure..."
             ls -la $(dirname $P4A_DIR/recipes/libffi)
             exit 1
           fi
