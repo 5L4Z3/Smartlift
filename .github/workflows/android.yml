@@ -68,32 +68,26 @@ jobs:
           pip install Cython==0.29.33
           pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
 
-      - name: Find and patch libffi recipe
+      - name: Patch libffi recipe (fix LT_SYS_SYMBOL_USCORE)
         run: |
-          # Search everywhere for the libffi recipe
-          echo "🔍 Searching for libffi recipe..."
-          LIBFFI_RECIPE=$(find /opt/hostedtoolcache/Python -path "*/pythonforandroid/recipes/libffi/__init__.py" -type f 2>/dev/null || true)
+          # Find the actual location of the pythonforandroid package
+          P4A_DIR=$(python -c "import pythonforandroid; print(pythonforandroid.__file__.replace('__init__.py', ''))")
+          echo "✅ Found pythonforandroid at: $P4A_DIR"
+
+          LIBFFI_RECIPE="$P4A_DIR/recipes/libffi/__init__.py"
           
-          if [ -z "$LIBFFI_RECIPE" ]; then
-            # Fallback: search in user site
-            LIBFFI_RECIPE=$(find $HOME/.local -path "*/pythonforandroid/recipes/libffi/__init__.py" -type f 2>/dev/null || true)
-          fi
-          
-          if [ -z "$LIBFFI_RECIPE" ]; then
-            echo "❌ libffi recipe not found!"
-            echo "🔍 Searched in /opt/hostedtoolcache/Python and $HOME/.local"
-            echo "📁 Listing all pythonforandroid directories:"
-            find /opt/hostedtoolcache/Python -name "pythonforandroid" -type d 2>/dev/null || true
+          if [ ! -f "$LIBFFI_RECIPE" ]; then
+            echo "❌ libffi recipe not found at $LIBFFI_RECIPE"
+            ls -la $(dirname $P4A_DIR/recipes/libffi)
             exit 1
           fi
 
-          echo "✅ Found libffi recipe at: $LIBFFI_RECIPE"
-          echo "✅ Patching to fix LT_SYS_SYMBOL_USCORE..."
-
-          # Apply the patch
+          echo "✅ Patching libffi recipe at $LIBFFI_RECIPE"
+          
+          # Apply the patch to skip the problematic macro
           sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' "$LIBFFI_RECIPE"
           sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' "$LIBFFI_RECIPE"
-
+          
           echo "✅ libffi recipe patched successfully!"
 
       - name: Download Android SDK Command-line Tools
