@@ -68,13 +68,22 @@ jobs:
           pip install Cython==0.29.33
           pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
 
-      - name: Patch libffi recipe (fix LT_SYS_SYMBOL_USCORE)
+      - name: Find and patch libffi recipe
         run: |
-          # Find the exact path to the libffi recipe
-          LIBFFI_RECIPE=$(find $HOME/.local/lib -path "*/pythonforandroid/recipes/libffi/__init__.py" -type f)
+          # Search everywhere for the libffi recipe
+          echo "🔍 Searching for libffi recipe..."
+          LIBFFI_RECIPE=$(find /opt/hostedtoolcache/Python -path "*/pythonforandroid/recipes/libffi/__init__.py" -type f 2>/dev/null || true)
+          
+          if [ -z "$LIBFFI_RECIPE" ]; then
+            # Fallback: search in user site
+            LIBFFI_RECIPE=$(find $HOME/.local -path "*/pythonforandroid/recipes/libffi/__init__.py" -type f 2>/dev/null || true)
+          fi
+          
           if [ -z "$LIBFFI_RECIPE" ]; then
             echo "❌ libffi recipe not found!"
-            find $HOME/.local/lib -name "__init__.py" | grep -i libffi
+            echo "🔍 Searched in /opt/hostedtoolcache/Python and $HOME/.local"
+            echo "📁 Listing all pythonforandroid directories:"
+            find /opt/hostedtoolcache/Python -name "pythonforandroid" -type d 2>/dev/null || true
             exit 1
           fi
 
