@@ -15,7 +15,7 @@ jobs:
       ANDROID_NDK_ROOT: ${{ github.workspace }}/android-sdk/ndk/27.2.12479018
       ANDROID_API: 33
       NDK_API: 21
-      ANDROID_BUILD_TOOLS: 33.0.2
+      ANDROID_BUILD_TOOLS: 35.0.0  # ← Updated to match Gradle requirement
 
     steps:
       - name: Checkout repository
@@ -39,11 +39,6 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt update -qq
-
-          # Remove modern autoconf/automake/libtool
-          sudo apt remove -y autoconf automake libtool || true
-
-          # Install compatible versions
           sudo apt install -y \
             unzip \
             openjdk-17-jdk \
@@ -55,43 +50,7 @@ jobs:
             libjpeg-dev \
             zlib1g-dev \
             build-essential \
-            libgl1-mesa-dev \
-            m4
-
-          # Install autoconf 2.69 (compatible with libffi)
-          cd /tmp
-          wget http://ftp.gnu.org/gnu/autoconf/autoconf-2.69.tar.gz
-          tar -xzf autoconf-2.69.tar.gz
-          cd autoconf-2.69
-          ./configure --prefix=/usr
-          make -j$(nproc)
-          sudo make install
-
-          # Install automake 1.15
-          cd /tmp
-          wget http://ftp.gnu.org/gnu/automake/automake-1.15.tar.gz
-          tar -xzf automake-1.15.tar.gz
-          cd automake-1.15
-          ./configure --prefix=/usr
-          make -j$(nproc)
-          sudo make install
-
-          # Install libtool 2.4.6
-          cd /tmp
-          wget http://ftp.gnu.org/gnu/libtool/libtool-2.4.6.tar.gz
-          tar -xzf libtool-2.4.6.tar.gz
-          cd libtool-2.4.6
-          ./configure --prefix=/usr
-          make -j$(nproc)
-          sudo make install
-
-          # Verify versions
-          echo "✅ autoconf version:"
-          autoconf --version | head -1
-          echo "✅ automake version:"
-          automake --version | head -1
-          echo "✅ libtool version:"
-          libtool --version | head -1
+            libgl1-mesa-dev
 
       - name: Install Apache Ant
         run: |
@@ -104,28 +63,6 @@ jobs:
           pip install --upgrade pip
           pip install Cython==0.29.33
           pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
-
-      - name: Patch libffi recipe (fix LT_SYS_SYMBOL_USCORE)
-        run: |
-          # Find the actual location of the pythonforandroid package
-          P4A_DIR=$(python -c "import pythonforandroid; print(pythonforandroid.__file__.replace('__init__.py', ''))")
-          echo "✅ Found pythonforandroid at: $P4A_DIR"
-
-          LIBFFI_RECIPE="$P4A_DIR/recipes/libffi/__init__.py"
-          
-          if [ ! -f "$LIBFFI_RECIPE" ]; then
-            echo "❌ libffi recipe not found at $LIBFFI_RECIPE"
-            ls -la $(dirname $P4A_DIR/recipes/libffi)
-            exit 1
-          fi
-
-          echo "✅ Patching libffi recipe at $LIBFFI_RECIPE"
-          
-          # Apply the patch to skip the problematic macro
-          sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' "$LIBFFI_RECIPE"
-          sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' "$LIBFFI_RECIPE"
-          
-          echo "✅ libffi recipe patched successfully!"
 
       - name: Download Android SDK Command-line Tools
         if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
@@ -156,7 +93,7 @@ jobs:
           sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
             "platform-tools" \
             "platforms;android-33" \
-            "build-tools;33.0.2"
+            "build-tools;35.0.0"  # ← Updated
 
       - name: Download Android NDK r27c (LTS)
         if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
