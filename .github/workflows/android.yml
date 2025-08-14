@@ -54,7 +54,7 @@ jobs:
 
       - name: Install Apache Ant
         run: |
-          wget --fail https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.13-bin.tar.gz  
+          wget https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.13-bin.tar.gz
           tar -xzf apache-ant-1.10.13-bin.tar.gz
           echo "${{ github.workspace }}/apache-ant-1.10.13/bin" >> $GITHUB_PATH
 
