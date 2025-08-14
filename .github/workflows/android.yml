@@ -21,15 +21,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Cache SDK & NDK
+      - name: Cache SDK, NDK, and pip
         uses: actions/cache@v3
-        id: cache-sdk
+        id: cache-build
         with:
           path: |
             android-sdk
             .p4a
-          key: android-sdk-${{ hashFiles('buildozer.spec') }}
-          restore-keys: android-sdk-
+            ~/.cache/pip
+          key: build-${{ hashFiles('main.py', 'requirements.txt') }}
+          restore-keys: build-
 
       - name: Setup Python 3.10
         uses: actions/setup-python@v4
@@ -53,12 +54,15 @@ jobs:
             build-essential \
             libgl1-mesa-dev
 
-      - name: Install Apache Ant
+      - name: Install Apache Ant (cached)
         run: |
           set -euo pipefail
-          wget --timeout=30 --tries=3 --fail https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.13-bin.tar.gz
-          tar -xzf apache-ant-1.10.13-bin.tar.gz
-          echo "${{ github.workspace }}/apache-ant-1.10.13/bin" >> $GITHUB_PATH
+          ANT_DIR="${{ github.workspace }}/apache-ant-1.10.13"
+          if [ ! -d "$ANT_DIR" ]; then
+            wget https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.13-bin.tar.gz
+            tar -xzf apache-ant-1.10.13-bin.tar.gz
+          fi
+          echo "$ANT_DIR/bin" >> $GITHUB_PATH
 
       - name: Install Cython and p4a
         run: |
@@ -67,25 +71,21 @@ jobs:
           pip install Cython==0.29.33
           pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
 
-      - name: Patch libffi recipe (fix LT_SYS_SYMBOL_USCORE)
+      - name: Patch libffi recipe (fail on missing)
         run: |
           set -euo pipefail
           P4A_DIR=$(python -c "import pythonforandroid; print(pythonforandroid.__file__.replace('__init__.py', ''))")
-          echo "✅ Found pythonforandroid at: $P4A_DIR"
-
           LIBFFI_RECIPE="$P4A_DIR/recipes/libffi/__init__.py"
           if [ ! -f "$LIBFFI_RECIPE" ]; then
             echo "❌ libffi recipe not found at $LIBFFI_RECIPE"
             exit 1
           fi
-
-          echo "✅ Patching libffi recipe at $LIBFFI_RECIPE"
           sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' "$LIBFFI_RECIPE"
           sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' "$LIBFFI_RECIPE"
           echo "✅ libffi recipe patched successfully!"
 
       - name: Download Android SDK Command-line Tools (retry + checksum)
-        if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
+        if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
         run: |
           set -euo pipefail
           SDK_URL="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
@@ -94,7 +94,7 @@ jobs:
           cd android-sdk/cmdline-tools
           for i in {1..5}; do
             echo "Attempt $i: downloading Android SDK command-line tools..."
-            wget --timeout=30 --tries=3 --fail "$SDK_URL" -O sdk.zip && break
+            wget --timeout=30 --tries=3 "$SDK_URL" -O sdk.zip && break
             echo "❌ Download failed, retrying in 15 seconds..."
             rm -f sdk.zip
             sleep 15
@@ -123,7 +123,7 @@ jobs:
           echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_SDK_ROOT/licenses/android-sdk-license
 
       - name: Install SDK Components
-        if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
+        if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
         run: |
           set -euo pipefail
           sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
@@ -132,7 +132,7 @@ jobs:
             "build-tools;35.0.0"
 
       - name: Download Android NDK r27c (retry + checksum)
-        if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
+        if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
         run: |
           set -euo pipefail
           NDK_URL="https://dl.google.com/android/repository/android-ndk-r27c-linux.zip"
@@ -141,7 +141,7 @@ jobs:
           cd ${{ github.workspace }}/android-sdk/ndk
           for i in {1..5}; do
             echo "Attempt $i: downloading Android NDK r27c..."
-            wget --timeout=30 --tries=3 --fail "$NDK_URL" -O ndk.zip && break
+            wget --timeout=30 --tries=3 "$NDK_URL" -O ndk.zip && break
             echo "❌ Download failed, retrying in 15 seconds..."
             rm -f ndk.zip
             sleep 15
