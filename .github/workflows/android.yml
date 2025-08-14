@@ -92,19 +92,10 @@ jobs:
           pip install Cython==0.29.33
           pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
 
-      - name: Patch libffi recipe (fail on missing)
+      - name: Start libffi patcher (background)
         run: |
-          set -euo pipefail
-          P4A_DIR=$(python -c "import pythonforandroid; print(pythonforandroid.__file__.replace('__init__.py', ''))")
-          LIBFFI_RECIPE="$P4A_DIR/recipes/libffi/__init__.py"
-          if [ ! -f "$LIBFFI_RECIPE" ]; then
-            echo "❌ libffi recipe not found at $LIBFFI_RECIPE"
-            ls -la $(dirname $P4A_DIR/recipes/libffi)
-            exit 1
-          fi
-          sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' "$LIBFFI_RECIPE"
-          sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' "$LIBFFI_RECIPE"
-          echo "✅ libffi recipe patched successfully!"
+          python patch_libffi.py &
+          sleep 5
 
       - name: Download Android SDK Command-line Tools (retry + checksum)
         if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
