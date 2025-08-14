@@ -16,21 +16,42 @@ jobs:
       ANDROID_API: 33
       NDK_API: 21
       ANDROID_BUILD_TOOLS: 35.0.0
+      DIST_NAME: smartlift
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Cache SDK, NDK, and pip
+      - name: Cache pip
         uses: actions/cache@v3
-        id: cache-build
         with:
-          path: |
-            android-sdk
-            .p4a
-            ~/.cache/pip
-          key: build-${{ hashFiles('main.py', 'requirements.txt') }}
-          restore-keys: build-
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: pip-
+
+      - name: Cache Android SDK
+        uses: actions/cache@v3
+        id: cache-sdk
+        with:
+          path: android-sdk/cmdline-tools/latest
+          key: sdk-${{ env.ANDROID_API }}-${{ env.ANDROID_BUILD_TOOLS }}-${{ hashFiles('main.py') }}
+          restore-keys: sdk-
+
+      - name: Cache Android NDK
+        uses: actions/cache@v3
+        id: cache-ndk
+        with:
+          path: android-sdk/ndk/27.2.12479018
+          key: ndk-${{ env.NDK_API }}-27.2.12479018
+          restore-keys: ndk-
+
+      - name: Cache python-for-android build environment
+        uses: actions/cache@v3
+        id: cache-p4a
+        with:
+          path: .p4a/dists/${{ env.DIST_NAME }}
+          key: p4a-${{ env.DIST_NAME }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: p4a-${{ env.DIST_NAME }}-
 
       - name: Setup Python 3.10
         uses: actions/setup-python@v4
@@ -78,6 +99,7 @@ jobs:
           LIBFFI_RECIPE="$P4A_DIR/recipes/libffi/__init__.py"
           if [ ! -f "$LIBFFI_RECIPE" ]; then
             echo "❌ libffi recipe not found at $LIBFFI_RECIPE"
+            ls -la $(dirname $P4A_DIR/recipes/libffi)
             exit 1
           fi
           sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' "$LIBFFI_RECIPE"
@@ -85,7 +107,7 @@ jobs:
           echo "✅ libffi recipe patched successfully!"
 
       - name: Download Android SDK Command-line Tools (retry + checksum)
-        if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
+        if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
         run: |
           set -euo pipefail
           SDK_URL="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
@@ -102,7 +124,16 @@ jobs:
           if [ ! -f sdk.zip ]; then
             echo "❌ Failed to download SDK after 5 attempts"; exit 1
           fi
-          echo "$SDK_SHA  sdk.zip" | sha256sum -c --status || { echo "❌ Checksum failed"; exit 1; }
+          echo "✅ Download complete, verifying checksum..."
+          ACTUAL_SHA=$(sha256sum sdk.zip | cut -d' ' -f1)
+          if [ "$ACTUAL_SHA" = "$SDK_SHA" ]; then
+            echo "✅ Checksum verified"
+          else
+            echo "❌ Checksum failed!"
+            echo "Expected: $SDK_SHA"
+            echo "Got:      $ACTUAL_SHA"
+            exit 1
+          fi
           unzip -q sdk.zip
           mkdir -p latest
           mv cmdline-tools/* latest/
@@ -123,7 +154,7 @@ jobs:
           echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_SDK_ROOT/licenses/android-sdk-license
 
       - name: Install SDK Components
-        if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
+        if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
         run: |
           set -euo pipefail
           sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
@@ -132,7 +163,7 @@ jobs:
             "build-tools;35.0.0"
 
       - name: Download Android NDK r27c (retry + checksum)
-        if: ${{ steps.cache-build.outputs.cache-hit != 'true' }}
+        if: ${{ steps.cache-ndk.outputs.cache-hit != 'true' }}
         run: |
           set -euo pipefail
           NDK_URL="https://dl.google.com/android/repository/android-ndk-r27c-linux.zip"
@@ -149,7 +180,16 @@ jobs:
           if [ ! -f ndk.zip ]; then
             echo "❌ Failed to download NDK after 5 attempts"; exit 1
           fi
-          echo "$NDK_SHA  ndk.zip" | sha256sum -c --status || { echo "❌ Checksum failed"; exit 1; }
+          echo "✅ Download complete, verifying checksum..."
+          ACTUAL_SHA=$(sha256sum ndk.zip | cut -d' ' -f1)
+          if [ "$ACTUAL_SHA" = "$NDK_SHA" ]; then
+            echo "✅ Checksum verified"
+          else
+            echo "❌ Checksum failed!"
+            echo "Expected: $NDK_SHA"
+            echo "Got:      $ACTUAL_SHA"
+            exit 1
+          fi
           unzip -q ndk.zip
           mv android-ndk-r27c 27.2.12479018
           rm -f ndk.zip
@@ -166,7 +206,7 @@ jobs:
             --requirements=python3,kivy==2.2.1,pillow,sdl2 \
             --arch=arm64-v8a \
             --copy-libs \
-            --dist-name=smartlift \
+            --dist-name=${{ env.DIST_NAME }} \
             --android-api=$ANDROID_API \
             --ndk-api=$NDK_API \
             --sdk-dir=$ANDROID_SDK_ROOT \
@@ -184,5 +224,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SmartLift-APK
-          path: dist/smartlift/*.apk
+          path: dist/${{ env.DIST_NAME }}/*.apk
           if-no-files-found: error
