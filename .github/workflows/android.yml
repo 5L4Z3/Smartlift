@@ -58,7 +58,7 @@ jobs:
           tar -xzf apache-ant-1.10.13-bin.tar.gz
           echo "${{ github.workspace }}/apache-ant-1.10.13/bin" >> $GITHUB_PATH
 
-      - name: Install Cython and p4a
+      - name: Install Cython and python-for-android
         run: |
           pip install --upgrade pip
           pip install Cython==0.29.33
@@ -66,30 +66,14 @@ jobs:
 
       - name: Patch libffi recipe (fix LT_SYS_SYMBOL_USCORE)
         run: |
-          # Find the actual location of the pythonforandroid package
           P4A_DIR=$(python -c "import pythonforandroid; print(pythonforandroid.__file__.replace('__init__.py', ''))")
-          echo "✅ Found pythonforandroid at: $P4A_DIR"
-
           LIBFFI_RECIPE="$P4A_DIR/recipes/libffi/__init__.py"
-          
-          if [ ! -f "$LIBFFI_RECIPE" ]; then
-            echo "❌ libffi recipe not found at $LIBFFI_RECIPE"
-            ls -la $(dirname $P4A_DIR/recipes/libffi)
-            exit 1
-          fi
-
-          echo "✅ Patching libffi recipe at $LIBFFI_RECIPE"
-          
-          # Apply the patch to skip the problematic macro
           sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' "$LIBFFI_RECIPE"
           sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' "$LIBFFI_RECIPE"
-          
-          echo "✅ libffi recipe patched successfully!"
 
       - name: Download Android SDK Command-line Tools (retry + checksum)
         if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
         run: |
-          # Fixed URL (no trailing spaces)
           SDK_URL="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
           SDK_SHA="15f4a3fddfd7ad62d3a5b450f8b93f4dbfa1f09d6e853b3c7bafbd8aab5b6b89"
           mkdir -p android-sdk/cmdline-tools
@@ -101,17 +85,8 @@ jobs:
             rm -f sdk.zip
             sleep 15
           done
-          if [ ! -f sdk.zip ]; then
-            echo "❌ Failed to download SDK after 5 attempts"
-            exit 1
-          fi
-          echo "✅ Download complete, verifying checksum..."
-          echo "$SDK_SHA  sdk.zip" | sha256sum -c --status
-          if [ $? -ne 0 ]; then
-            echo "❌ Checksum verification failed!"
-            exit 1
-          fi
-          echo "✅ Checksum verified"
+          if [ ! -f sdk.zip ]; then echo "❌ Failed to download SDK after 5 attempts"; exit 1; fi
+          echo "$SDK_SHA  sdk.zip" | sha256sum -c --status || { echo "❌ Checksum failed"; exit 1; }
           unzip -q sdk.zip
           mkdir -p latest
           mv cmdline-tools/* latest/
@@ -151,22 +126,13 @@ jobs:
             rm -f ndk.zip
             sleep 15
           done
-          if [ ! -f ndk.zip ]; then
-            echo "❌ Failed to download NDK after 5 attempts"
-            exit 1
-          fi
-          echo "✅ Download complete, verifying checksum..."
-          echo "$NDK_SHA  ndk.zip" | sha256sum -c --status
-          if [ $? -ne 0 ]; then
-            echo "❌ Checksum verification failed!"
-            exit 1
-          fi
-          echo "✅ Checksum verified"
+          if [ ! -f ndk.zip ]; then echo "❌ Failed to download NDK after 5 attempts"; exit 1; fi
+          echo "$NDK_SHA  ndk.zip" | sha256sum -c --status || { echo "❌ Checksum failed"; exit 1; }
           unzip -q ndk.zip
           mv android-ndk-r27c 27.2.12479018
           rm -f ndk.zip
 
-      - name: Build APK with p4a directly
+      - name: Build APK with python-for-android
         run: |
           p4a apk \
             --private . \
