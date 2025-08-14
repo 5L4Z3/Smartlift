@@ -111,7 +111,7 @@ jobs:
         run: |
           set -euo pipefail
           SDK_URL="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
-          SDK_SHA="15f4a3fddfd7ad62d3a5b450f8b93f4dbfa1f09d6e853b3c7bafbd8aab5b6b89"
+          SDK_SHA="bd1aa17c7ef10066949c88dc6c9c8d536be27f992a1f3b5a584f9bd2ba5646a0"
           mkdir -p android-sdk/cmdline-tools
           cd android-sdk/cmdline-tools
           for i in {1..5}; do
