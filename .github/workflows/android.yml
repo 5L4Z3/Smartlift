@@ -15,7 +15,7 @@ jobs:
       ANDROID_NDK_ROOT: ${{ github.workspace }}/android-sdk/ndk/27.2.12479018
       ANDROID_API: 33
       NDK_API: 21
-      ANDROID_BUILD_TOOLS: 35.0.0  # ← Updated to match Gradle requirement
+      ANDROID_BUILD_TOOLS: 35.0.0
 
     steps:
       - name: Checkout repository
@@ -50,7 +50,8 @@ jobs:
             libjpeg-dev \
             zlib1g-dev \
             build-essential \
-            libgl1-mesa-dev
+            libgl1-mesa-dev \
+            sha256sum
 
       - name: Install Apache Ant
         run: |
@@ -64,17 +65,30 @@ jobs:
           pip install Cython==0.29.33
           pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
 
-      - name: Download Android SDK Command-line Tools
+      - name: Download Android SDK Command-line Tools (retry + checksum)
         if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
         run: |
+          SDK_URL="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
+          SDK_SHA="15f4a3fddfd7ad62d3a5b450f8b93f4dbfa1f09d6e853b3c7bafbd8aab5b6b89"  # Official SHA256
           mkdir -p android-sdk/cmdline-tools
           cd android-sdk/cmdline-tools
-          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip -q commandlinetools-linux-9477386_latest.zip
+          for i in {1..5}; do
+            echo "Attempt $i: downloading Android SDK command-line tools..."
+            wget --timeout=30 --tries=3 "$SDK_URL" -O sdk.zip || true
+            if echo "$SDK_SHA  sdk.zip" | sha256sum -c --status; then
+              echo "✅ SDK checksum verified"
+              break
+            else
+              echo "❌ SDK checksum failed, retrying in 15 seconds..."
+              rm -f sdk.zip
+              sleep 15
+            fi
+          done
+          unzip -q sdk.zip
           mkdir -p latest
           mv cmdline-tools/* latest/
           rmdir cmdline-tools
-          rm -f commandlinetools-linux-9477386_latest.zip
+          rm -f sdk.zip
 
       - name: Add SDK tools to PATH
         run: |
@@ -93,17 +107,30 @@ jobs:
           sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
             "platform-tools" \
             "platforms;android-33" \
-            "build-tools;35.0.0"  # ← Updated
+            "build-tools;35.0.0"
 
-      - name: Download Android NDK r27c (LTS)
+      - name: Download Android NDK r27c (retry + checksum)
         if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
         run: |
+          NDK_URL="https://dl.google.com/android/repository/android-ndk-r27c-linux.zip"
+          NDK_SHA="ac3025e28bcdb1c2fdc61ac5b7a5b0575870b798baf4f1b594a4db78b82b45a6"  # Official SHA256
           mkdir -p ${{ github.workspace }}/android-sdk/ndk
           cd ${{ github.workspace }}/android-sdk/ndk
-          wget https://dl.google.com/android/repository/android-ndk-r27c-linux.zip -O ndk.zip
+          for i in {1..5}; do
+            echo "Attempt $i: downloading Android NDK r27c..."
+            wget --timeout=30 --tries=3 "$NDK_URL" -O ndk.zip || true
+            if echo "$NDK_SHA  ndk.zip" | sha256sum -c --status; then
+              echo "✅ NDK checksum verified"
+              break
+            else
+              echo "❌ NDK checksum failed, retrying in 15 seconds..."
+              rm -f ndk.zip
+              sleep 15
+            fi
+          done
           unzip -q ndk.zip
           mv android-ndk-r27c 27.2.12479018
-          rm ndk.zip
+          rm -f ndk.zip
 
       - name: Build APK with p4a directly
         run: |
