@@ -38,6 +38,7 @@ jobs:
 
       - name: Install system dependencies
         run: |
+          set -euo pipefail
           sudo apt update -qq
           sudo apt install -y \
             unzip \
@@ -54,38 +55,53 @@ jobs:
 
       - name: Install Apache Ant
         run: |
-          wget https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.13-bin.tar.gz
+          set -euo pipefail
+          wget --timeout=30 --tries=3 --fail https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.13-bin.tar.gz
           tar -xzf apache-ant-1.10.13-bin.tar.gz
           echo "${{ github.workspace }}/apache-ant-1.10.13/bin" >> $GITHUB_PATH
 
-      - name: Install Cython and python-for-android
+      - name: Install Cython and p4a
         run: |
+          set -euo pipefail
           pip install --upgrade pip
           pip install Cython==0.29.33
           pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
 
       - name: Patch libffi recipe (fix LT_SYS_SYMBOL_USCORE)
         run: |
+          set -euo pipefail
           P4A_DIR=$(python -c "import pythonforandroid; print(pythonforandroid.__file__.replace('__init__.py', ''))")
+          echo "✅ Found pythonforandroid at: $P4A_DIR"
+
           LIBFFI_RECIPE="$P4A_DIR/recipes/libffi/__init__.py"
+          if [ ! -f "$LIBFFI_RECIPE" ]; then
+            echo "❌ libffi recipe not found at $LIBFFI_RECIPE"
+            exit 1
+          fi
+
+          echo "✅ Patching libffi recipe at $LIBFFI_RECIPE"
           sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' "$LIBFFI_RECIPE"
           sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' "$LIBFFI_RECIPE"
+          echo "✅ libffi recipe patched successfully!"
 
       - name: Download Android SDK Command-line Tools (retry + checksum)
         if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
         run: |
+          set -euo pipefail
           SDK_URL="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
           SDK_SHA="15f4a3fddfd7ad62d3a5b450f8b93f4dbfa1f09d6e853b3c7bafbd8aab5b6b89"
           mkdir -p android-sdk/cmdline-tools
           cd android-sdk/cmdline-tools
           for i in {1..5}; do
             echo "Attempt $i: downloading Android SDK command-line tools..."
-            wget --timeout=30 --tries=3 "$SDK_URL" -O sdk.zip && break
+            wget --timeout=30 --tries=3 --fail "$SDK_URL" -O sdk.zip && break
             echo "❌ Download failed, retrying in 15 seconds..."
             rm -f sdk.zip
             sleep 15
           done
-          if [ ! -f sdk.zip ]; then echo "❌ Failed to download SDK after 5 attempts"; exit 1; fi
+          if [ ! -f sdk.zip ]; then
+            echo "❌ Failed to download SDK after 5 attempts"; exit 1
+          fi
           echo "$SDK_SHA  sdk.zip" | sha256sum -c --status || { echo "❌ Checksum failed"; exit 1; }
           unzip -q sdk.zip
           mkdir -p latest
@@ -95,11 +111,13 @@ jobs:
 
       - name: Add SDK tools to PATH
         run: |
+          set -euo pipefail
           echo "${{ github.workspace }}/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "${{ github.workspace }}/android-sdk/platform-tools" >> $GITHUB_PATH
 
       - name: Accept licenses
         run: |
+          set -euo pipefail
           mkdir -p $ANDROID_SDK_ROOT/licenses
           echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_SDK_ROOT/licenses/android-sdk-license
           echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_SDK_ROOT/licenses/android-sdk-license
@@ -107,6 +125,7 @@ jobs:
       - name: Install SDK Components
         if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
         run: |
+          set -euo pipefail
           sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
             "platform-tools" \
             "platforms;android-33" \
@@ -115,25 +134,29 @@ jobs:
       - name: Download Android NDK r27c (retry + checksum)
         if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
         run: |
+          set -euo pipefail
           NDK_URL="https://dl.google.com/android/repository/android-ndk-r27c-linux.zip"
           NDK_SHA="ac3025e28bcdb1c2fdc61ac5b7a5b0575870b798baf4f1b594a4db78b82b45a6"
           mkdir -p ${{ github.workspace }}/android-sdk/ndk
           cd ${{ github.workspace }}/android-sdk/ndk
           for i in {1..5}; do
             echo "Attempt $i: downloading Android NDK r27c..."
-            wget --timeout=30 --tries=3 "$NDK_URL" -O ndk.zip && break
+            wget --timeout=30 --tries=3 --fail "$NDK_URL" -O ndk.zip && break
             echo "❌ Download failed, retrying in 15 seconds..."
             rm -f ndk.zip
             sleep 15
           done
-          if [ ! -f ndk.zip ]; then echo "❌ Failed to download NDK after 5 attempts"; exit 1; fi
+          if [ ! -f ndk.zip ]; then
+            echo "❌ Failed to download NDK after 5 attempts"; exit 1
+          fi
           echo "$NDK_SHA  ndk.zip" | sha256sum -c --status || { echo "❌ Checksum failed"; exit 1; }
           unzip -q ndk.zip
           mv android-ndk-r27c 27.2.12479018
           rm -f ndk.zip
 
-      - name: Build APK with python-for-android
+      - name: Build APK with p4a directly
         run: |
+          set -euo pipefail
           p4a apk \
             --private . \
             --package=org.example.smartlift \
