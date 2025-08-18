@@ -11,7 +11,8 @@ from kivy.clock import Clock
 from kivy.core.audio import SoundLoader
 from datetime import datetime
 
-kivy.require('2.1.0')
+# Match the version you build with in p4a requirements (kivy==2.2.1)
+kivy.require('2.2.1')
 
 class WorkoutPlan:
     def __init__(self, name, days):
@@ -35,11 +36,9 @@ class SmartLiftApp(App):
         return self.root
 
     def init_data(self):
-        # Use writable directory on Android
         data_dir = App.get_running_app().user_data_dir
         self.store = JsonStore(f'{data_dir}/workout_plans.json')
 
-        # Initialize default plan
         if not hasattr(self, 'current_plan') or self.current_plan is None:
             self.current_plan = WorkoutPlan(name="Sample Plan", days=[
                 {"name": "Chest & Triceps", "rest": False, "exercises": []},
@@ -47,13 +46,11 @@ class SmartLiftApp(App):
                 {"name": "Rest Day", "rest": True, "exercises": []}
             ])
 
-        # Load from storage
         if self.store.exists(self.current_plan_key):
             self.current_plan = WorkoutPlan.from_dict(self.store.get(self.current_plan_key))
         else:
             self.store.put(self.current_plan_key, **self.current_plan.to_dict())
 
-        # Load sound safely
         try:
             self.bell_sound = SoundLoader.load('bell_sound.mp3')
             if not self.bell_sound:
