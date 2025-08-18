@@ -13,6 +13,11 @@ jobs:
       matrix:
         abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
 
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -42,8 +47,15 @@ jobs:
         run: cp buildozer.spec buildozer.spec.bak
 
       - name: Set architecture
-        run: |
-          sed -i "s/^android.arch =.*/android.arch = ${matrix.abi}/" buildozer.spec
+        run: sed -i "s/^android.arch =.*/android.arch = ${matrix.abi}/" buildozer.spec
+
+      - name: Decode keystore (if present)
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.keystore
+
+      - name: Set ANDROID_KEYSTORE_PATH environment
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        run: echo "ANDROID_KEYSTORE_PATH=$(pwd)/release.keystore" >> $GITHUB_ENV
 
       - name: Build APK
         run: buildozer android debug
@@ -57,6 +69,10 @@ jobs:
   build_universal:
     runs-on: ubuntu-latest
     needs: build
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -70,6 +86,14 @@ jobs:
 
       - name: Restore original buildozer.spec
         run: cp buildozer.spec.bak buildozer.spec
+
+      - name: Decode keystore (if present)
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.keystore
+
+      - name: Set ANDROID_KEYSTORE_PATH environment
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        run: echo "ANDROID_KEYSTORE_PATH=$(pwd)/release.keystore" >> $GITHUB_ENV
 
       - name: Build Universal APK
         run: |
