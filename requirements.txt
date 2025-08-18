@@ -1,0 +1,3 @@
+# Used for the GitHub Actions pip cache key, not by p4a build requirements
+pip>=23.2
+wheel
