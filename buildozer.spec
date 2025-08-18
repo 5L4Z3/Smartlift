@@ -1,37 +1,34 @@
 [app]
-# App metadata
 title = SmartLift
 package.name = smartlift
-package.domain = org.example
-version = 1.0
+package.domain = com.smartlift
 source.dir = .
-source.main = main.py
-source.include_exts = py,png,jpg,jpeg,kv,atlas,mp3
-
-# Requirements - keep in sync with the workflow
-requirements = python3,kivy==2.2.1,pillow,sdl2
-
-# Android
+source.include_exts = py,png,jpg,kv,atlas
+version = 1.0.0
+requirements = python3,kivy
 orientation = portrait
-android.permissions = INTERNET
-android.api = 33
-android.minapi = 21
-android.build_tools = 35.0.0
-android.ndk = 27.2.12479018
-android.archs = arm64-v8a, armeabi-v7a, x86_64
+fullscreen = 0
 
-# Assets
-icon.filename = Icon.png
-presplash.filename = Preplash.png
+# Icon and Presplash
+icon.filename = assets/Icon.png
+presplash.filename = assets/Preplash.png
 
-# P4A / Buildozer
-p4a.bootstrap = sdl2
-p4a.whitelist = whitelist.txt
+# Permissions
+android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,VIBRATE
 
-# Buildozer behavior
+# Supported architectures
+android.arch = arm64-v8a
+
+# Entry point
+entrypoint = main.py
+
+# Packaging
+package.format = apk
+
+[buildozer]
 log_level = 2
 warn_on_root = 1
-build_dir = .buildozer
 
-[buildozer:platform:android]
-accept_android_sdk_license = True
+[app:source.include_patterns]
+*.py
+assets/*
