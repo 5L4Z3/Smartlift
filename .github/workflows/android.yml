@@ -1,93 +1,83 @@
-name: Android Build
+name: Build Android APK
 
 on:
   push:
     branches: [main]
-  workflow_dispatch:
-
-env:
-  ANDROID_HOME: /usr/local/android-sdk
-  ANDROID_NDK_HOME: /usr/local/android-ndk
+  pull_request:
+    branches: [main]
 
 jobs:
   build:
-    name: Build APKs
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        abi: [x86, x86_64, armeabi-v7a, arm64-v8a]
+        abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.10
+          python-version: 3.12
 
-      - name: Install dependencies
+      - name: Install system dependencies
         run: |
-          sudo apt update
-          sudo apt install -y zip unzip default-jdk git curl
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake libtool pkg-config unzip openjdk-17-jdk
 
-      - name: Install python-for-android & Buildozer
+      - name: Install Python dependencies
         run: |
-          pip install --upgrade pip
-          pip install python-for-android buildozer
+          python -m pip install --upgrade pip
+          pip install --upgrade cython python-for-android buildozer
 
       - name: Make patch_libffi executable
         run: chmod +x .github/scripts/patch_libffi.py
 
-      - name: Patch libffi
-        run: .github/scripts/patch_libffi.py
+      - name: Run libffi patch
+        run: python .github/scripts/patch_libffi.py
 
-      - name: Update buildozer.spec for ABI
+      - name: Backup buildozer.spec
+        run: cp buildozer.spec buildozer.spec.bak
+
+      - name: Set architecture
         run: |
-          cp buildozer.spec buildozer.spec.bak
-          sed -i "s/^android.arch = .*/android.arch = ${MATRIX_ABI}/" buildozer.spec
+          sed -i "s/^android.arch =.*/android.arch = ${matrix.abi}/" buildozer.spec
 
       - name: Build APK
-        run: |
-          buildozer android debug
+        run: buildozer android debug
 
-      - name: Upload ABI APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: smartlift-${{ matrix.abi }}
+          name: "SmartLift-${{ matrix.abi }}"
           path: bin/*.apk
 
-  universal:
-    name: Universal APK
+  build_universal:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download ABI APKs
-        uses: actions/download-artifact@v4
-        with:
-          path: bin
-
-      - name: Install Bundletool
+      - name: Install Python & dependencies
         run: |
-          curl -L -o bundletool.jar https://github.com/google/bundletool/releases/download/1.16.1/bundletool-all-1.16.1.jar
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake libtool pkg-config unzip openjdk-17-jdk
+          python -m pip install --upgrade pip
+          pip install --upgrade cython python-for-android buildozer
 
-      - name: Generate universal APK
+      - name: Restore original buildozer.spec
+        run: cp buildozer.spec.bak buildozer.spec
+
+      - name: Build Universal APK
         run: |
-          mkdir merged
-          java -jar bundletool.jar build-apks \
-              --mode=universal \
-              --output=merged/smartlift.universal.apks \
-              --bundle=bin/smartlift.aab \
-              --ks=$ANDROID_KEYSTORE \
-              --ks-key-alias=$KEY_ALIAS \
-              --ks-pass=pass:$KEYSTORE_PASS \
-              --key-pass=pass:$KEY_PASS
-          unzip merged/smartlift.universal.apks -d merged/
+          sed -i "s/^android.arch =.*/android.arch = armeabi-v7a,arm64-v8a,x86,x86_64/" buildozer.spec
+          buildozer android debug
 
-      - name: Upload universal APK
+      - name: Upload Universal APK
         uses: actions/upload-artifact@v4
         with:
-          name: smartlift-universal
-          path: merged/universal.apk
+          name: SmartLift-universal
+          path: bin/*.apk
