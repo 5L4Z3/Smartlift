@@ -10,3 +10,6 @@ bin/
 # OS
 .DS_Store
 Thumbs.db
+
+# Android SDK/NDK (downloaded in CI)
+android-sdk/
