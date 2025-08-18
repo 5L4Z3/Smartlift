@@ -1,55 +1,40 @@
 #!/usr/bin/env python3
-import os, time, sys
+"""
+Deterministically patch the libffi recipe in the installed python-for-android package.
+Safe and idempotent. Not used by CI (the CI inlines this logic before build),
+but handy for local builds if needed.
+"""
+
+import os
+import sys
 from pathlib import Path
 
-def patch_file(path: Path) -> bool:
-    text = path.read_text(encoding="utf-8")
-    changed = False
+try:
+    import pythonforandroid as p4a
+except Exception as e:
+    print(f"❌ Could not import pythonforandroid: {e}")
+    sys.exit(1)
 
-    # Insert env["HAVE_HIDDEN"] = "0" after line containing "LDFLAGS="
-    if 'env["HAVE_HIDDEN"] = "0"' not in text and 'LDFLAGS=' in text:
-        new_text = []
-        for line in text.splitlines(True):
-            new_text.append(line)
-            if 'LDFLAGS=' in line and 'HAVE_HIDDEN' not in line:
-                new_text.append('        env["HAVE_HIDDEN"] = "0"\n')
-                changed = True
-        text = "".join(new_text)
+p4a_dir = Path(p4a.__file__).parent
+recipe = p4a_dir / "recipes" / "libffi" / "__init__.py"
 
-    # Ensure --disable-raw-api alongside --enable-shared
-    if '"--enable-shared"' in text and '"--disable-raw-api"' not in text:
-        text = text.replace('"--enable-shared"', '"--enable-shared", "--disable-raw-api"')
-        changed = True
+if not recipe.exists():
+    print(f"❌ libffi recipe not found at {recipe}")
+    sys.exit(1)
 
-    if changed:
-        path.write_text(text, encoding="utf-8")
-    return changed
+text = recipe.read_text()
 
-def find_candidates():
-    candidates = []
-    try:
-        import pythonforandroid as p4a
-        p = Path(p4a.__file__).parent / "recipes" / "libffi" / "__init__.py"
-        candidates.append(p)
-    except Exception:
-        pass
-    home = Path.home()
-    p2 = home / ".local" / "share" / "python-for-android" / "recipes" / "libffi" / "__init__.py"
-    candidates.append(p2)
-    return candidates
+changed = False
+if 'env["HAVE_HIDDEN"] = "0"' not in text:
+    text = text.replace('"LDFLAGS="', '"LDFLAGS="\n        env["HAVE_HIDDEN"] = "0"')
+    changed = True
 
-def main():
-    deadline = time.time() + 600
-    candidates = find_candidates()
-    while time.time() < deadline:
-        for cand in candidates:
-            if cand.exists():
-                changed = patch_file(cand)
-                print(("✅ Patched" if changed else "ℹ️ Already patched"), cand)
-                return 0
-        time.sleep(5)
-    print("❌ libffi recipe not found to patch within timeout.")
-    return 0
+if '"--disable-raw-api"' not in text and '"--enable-shared"' in text:
+    text = text.replace('"--enable-shared"', '"--enable-shared", "--disable-raw-api"')
+    changed = True
 
-if __name__ == "__main__":
-    sys.exit(main())
+if changed:
+    recipe.write_text(text)
+    print(f"✅ Patched {recipe}")
+else:
+    print("ℹ️ Already patched; no changes made.")
