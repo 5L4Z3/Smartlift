@@ -1,21 +1,17 @@
 [app]
 title = SmartLift
 package.name = smartlift
-package.domain = com.yourcompany
-source.include_exts = py,png,jpg,kv,atlas
+package.domain = com.yourdomain
+source.include_exts = py,png,jpg,kv,atlas,ttf,otf
 version = 1.0.0
-requirements = python3,kivy,kivymd
+requirements = python3,kivy,kivymd,othermodules
 orientation = portrait
 fullscreen = 0
-android.api = 33
-android.ndk = 25b
-android.minapi = 21
-android.arch = all
-android.multi_arch = True
-android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
-icon.filename = %(source.dir)s/icon.png
-presplash.filename = %(source.dir)s/presplash.png
-android.keystore = %(source.dir)s/keystore.jks
-android.keystore_alias = myalias
-android.keystore_pass = mykeystorepass
-android.keyalias_pass = mykeyaliaspass
+presplash.filename = presplash.png
+icon.filename = icon.png
+
+[buildozer]
+log_level = 2
+warn_on_root = 1
+build_dir = ./build
+bin_dir = ./bin
