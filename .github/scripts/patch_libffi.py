@@ -1,58 +1,55 @@
 #!/usr/bin/env python3
-"""
-Patch the libffi recipe in python-for-android to fix the LT_SYS_SYMBOL_USCORE error.
-This script waits for the recipe to exist, then applies safe edits.
-"""
-
-import os
-import sys
-import time
+import os, time, sys
 from pathlib import Path
-from datetime import datetime
 
-def log(msg, error=False):
-    ts = datetime.now().strftime("%H:%M:%S")
-    prefix = "❌" if error else "✅"
-    print(f"[{ts}] {prefix} {msg}")
+def patch_file(path: Path) -> bool:
+    text = path.read_text(encoding="utf-8")
+    changed = False
 
-def wait_and_patch():
+    # Insert env["HAVE_HIDDEN"] = "0" after line containing "LDFLAGS="
+    if 'env["HAVE_HIDDEN"] = "0"' not in text and 'LDFLAGS=' in text:
+        new_text = []
+        for line in text.splitlines(True):
+            new_text.append(line)
+            if 'LDFLAGS=' in line and 'HAVE_HIDDEN' not in line:
+                new_text.append('        env["HAVE_HIDDEN"] = "0"\n')
+                changed = True
+        text = "".join(new_text)
+
+    # Ensure --disable-raw-api alongside --enable-shared
+    if '"--enable-shared"' in text and '"--disable-raw-api"' not in text:
+        text = text.replace('"--enable-shared"', '"--enable-shared", "--disable-raw-api"')
+        changed = True
+
+    if changed:
+        path.write_text(text, encoding="utf-8")
+    return changed
+
+def find_candidates():
+    candidates = []
+    try:
+        import pythonforandroid as p4a
+        p = Path(p4a.__file__).parent / "recipes" / "libffi" / "__init__.py"
+        candidates.append(p)
+    except Exception:
+        pass
     home = Path.home()
-    recipe_dir = home / ".local" / "share" / "python-for-android" / "recipes" / "libffi"
-    init_py = recipe_dir / "__init__.py"
+    p2 = home / ".local" / "share" / "python-for-android" / "recipes" / "libffi" / "__init__.py"
+    candidates.append(p2)
+    return candidates
 
-    log("Waiting for libffi recipe to be created...")
-    for _ in range(600):  # Wait up to 10 minutes
-        if init_py.exists():
-            break
-        time.sleep(10)
-    else:
-        log("libffi recipe not found after 10 minutes!", error=True)
-        sys.exit(1)
-
-    log(f"Found libffi recipe at {init_py}")
-
-    with open(init_py, "r") as f:
-        lines = f.readlines()
-
-    patched_lines = []
-    inserted_have_hidden = False
-    for line in lines:
-        patched_lines.append(line)
-        if '"LDFLAGS="' in line and not inserted_have_hidden:
-            patched_lines.append('        env["HAVE_HIDDEN"] = "0"\n')
-            inserted_have_hidden = True
-
-    patched_lines = [
-        line.replace('"--enable-shared"', '"--enable-shared", "--disable-raw-api"')
-        if '"--enable-shared"' in line and '"--disable-raw-api"' not in line
-        else line
-        for line in patched_lines
-    ]
-
-    with open(init_py, "w") as f:
-        f.writelines(patched_lines)
-
-    log("libffi recipe patched successfully! Build can proceed.")
+def main():
+    deadline = time.time() + 600
+    candidates = find_candidates()
+    while time.time() < deadline:
+        for cand in candidates:
+            if cand.exists():
+                changed = patch_file(cand)
+                print(("✅ Patched" if changed else "ℹ️ Already patched"), cand)
+                return 0
+        time.sleep(5)
+    print("❌ libffi recipe not found to patch within timeout.")
+    return 0
 
 if __name__ == "__main__":
-    wait_and_patch()
+    sys.exit(main())
