@@ -1,34 +1,40 @@
+# -*- coding: utf-8 -*-
+# Buildozer configuration file for SmartLift Android app
+
 [app]
+# (Replace with your app details)
 title = SmartLift
 package.name = smartlift
-package.domain = com.smartlift
-source.dir = .
+package.domain = com.yourcompany
 source.include_exts = py,png,jpg,kv,atlas
 version = 1.0.0
-requirements = python3,kivy
 orientation = portrait
 fullscreen = 0
-
-# Icon and Presplash
-icon.filename = assets/Icon.png
-presplash.filename = assets/Preplash.png
+android.api = 33
+android.minapi = 21
+android.target = 33
+# ABI will be replaced per matrix job
+android.arch = __ABI__
 
 # Permissions
-android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,VIBRATE
+android.permissions = INTERNET, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE
 
-# Supported architectures
-android.arch = arm64-v8a
+# Requirements (example, adapt to your project)
+requirements = python3,kivy,cython,requests,openssl,libffi
 
-# Entry point
-entrypoint = main.py
+# Additional Android configs
+android.sdk_path = /opt/android-sdk
+android.ndk_path = /opt/android-ndk
+android.gradle_dependencies =
+    androidx.appcompat:appcompat:1.6.1
 
-# Packaging
-package.format = apk
+# Signing config placeholders (to use GitHub Secrets)
+# These will be set via buildozer command
+# android.release_keystore = my-release-key.keystore
+# android.keystore_password = <keystore-password>
+# android.keyalias_name = <key-alias>
+# android.keyalias_password = <key-password>
 
 [buildozer]
 log_level = 2
 warn_on_root = 1
-
-[app:source.include_patterns]
-*.py
-assets/*
