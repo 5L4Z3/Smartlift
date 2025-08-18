@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 """
-Deterministically patch the libffi recipe in the installed python-for-android package.
-Safe and idempotent. Not used by CI (the CI inlines this logic before build),
-but handy for local builds if needed.
+Deterministic patch of the installed python-for-android libffi recipe.
+Idempotent and safe for CI/local use.
 """
 
-import os
 import sys
 from pathlib import Path
-
 try:
     import pythonforandroid as p4a
 except Exception as e:
-    print(f"❌ Could not import pythonforandroid: {e}")
+    print("❌ pythonforandroid import failed:", e)
     sys.exit(1)
 
 p4a_dir = Path(p4a.__file__).parent
@@ -22,9 +19,9 @@ if not recipe.exists():
     print(f"❌ libffi recipe not found at {recipe}")
     sys.exit(1)
 
-text = recipe.read_text()
-
+text = recipe.read_text(encoding="utf-8")
 changed = False
+
 if 'env["HAVE_HIDDEN"] = "0"' not in text:
     text = text.replace('"LDFLAGS="', '"LDFLAGS="\n        env["HAVE_HIDDEN"] = "0"')
     changed = True
@@ -34,7 +31,7 @@ if '"--disable-raw-api"' not in text and '"--enable-shared"' in text:
     changed = True
 
 if changed:
-    recipe.write_text(text)
-    print(f"✅ Patched {recipe}")
+    recipe.write_text(text, encoding="utf-8")
+    print("✅ libffi recipe patched")
 else:
-    print("ℹ️ Already patched; no changes made.")
+    print("ℹ️ libffi recipe already patched (no-op)")
