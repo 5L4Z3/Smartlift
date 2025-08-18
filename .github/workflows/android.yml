@@ -1,125 +1,101 @@
-name: Android APK Build
+name: Android Build
 
 on:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
-    env:
-      SDK_URL: https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-      SDK_SHA: 15f4a3fddfd7ad62d3a5b450f8b93f4dbfa1f09d6e853b3c7bafbd8aab5b6b89
-      NDK_URL: https://dl.google.com/android/repository/android-ndk-r27c-linux.zip
-      NDK_SHA: 41036c703a9b3348b9fc46b5b86d744560d016aebf089f72bdf2a70eab2e726b
-
     steps:
-      - name: Checkout repository
+      # --- Checkout repo ---
+      - name: 📥 Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      # --- Set up Python ---
+      - name: 🐍 Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install system dependencies
+      # --- Install dependencies ---
+      - name: 📦 Install dependencies
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            openjdk-17-jdk unzip wget git python3-pip python3-setuptools \
-            build-essential autoconf libtool pkg-config zlib1g-dev
+          python -m pip install --upgrade pip
+          pip install Cython==0.29.36
+          pip install git+https://github.com/kivy/python-for-android.git
+          pip install buildozer
 
-      - name: Cache Android SDK
-        id: cache-sdk
-        uses: actions/cache@v4
-        with:
-          path: android-sdk
-          key: ${{ runner.os }}-android-sdk
-
-      - name: Download Android SDK (retry + checksum)
-        if: steps.cache-sdk.outputs.cache-hit != 'true'
+      # --- Android SDK/NDK setup ---
+      - name: 📲 Download Android SDK & NDK
         run: |
           set -e
-          mkdir -p android-sdk/cmdline-tools
-          cd android-sdk/cmdline-tools
+          SDK_URL="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
+          NDK_URL="https://dl.google.com/android/repository/android-ndk-r27c-linux.zip"
 
-          for i in {1..5}; do
-            echo "Attempt $i: downloading Android SDK..."
-            wget --timeout=30 --tries=3 "$SDK_URL" -O sdk.zip && break
-            echo "❌ Download failed, retrying in 15s..."
-            rm -f sdk.zip
-            sleep 15
-          done
+          mkdir -p $HOME/android
+          cd $HOME/android
 
-          if [ ! -f sdk.zip ]; then
-            echo "❌ Failed to download SDK after 5 attempts"; exit 1
-          fi
+          echo "⬇️ Downloading SDK..."
+          wget -q --show-progress --retry-connrefused --tries=5 $SDK_URL -O sdk.zip
+          unzip -q sdk.zip -d cmdline-tools
+          mv cmdline-tools/cmdline-tools cmdline-tools/latest
+          rm sdk.zip
 
-          echo "$SDK_SHA  sdk.zip" | sha256sum -c --status || { echo "❌ SDK checksum failed"; exit 1; }
-
-          unzip -q sdk.zip
-          mkdir -p latest
-          mv cmdline-tools/* latest/
-          rmdir cmdline-tools || true
-          rm -f sdk.zip
-
-      - name: Cache Android NDK
-        id: cache-ndk
-        uses: actions/cache@v4
-        with:
-          path: android-ndk
-          key: ${{ runner.os }}-android-ndk
-
-      - name: Download Android NDK (retry + checksum)
-        if: steps.cache-ndk.outputs.cache-hit != 'true'
-        run: |
-          set -e
-          mkdir -p android-ndk
-          cd android-ndk
-
-          for i in {1..5}; do
-            echo "Attempt $i: downloading Android NDK..."
-            wget --timeout=30 --tries=3 "$NDK_URL" -O ndk.zip && break
-            echo "❌ Download failed, retrying in 15s..."
-            rm -f ndk.zip
-            sleep 15
-          done
-
-          if [ ! -f ndk.zip ]; then
-            echo "❌ Failed to download NDK after 5 attempts"; exit 1
-          fi
-
-          echo "$NDK_SHA  ndk.zip" | sha256sum -c --status || { echo "❌ NDK checksum failed"; exit 1; }
-
+          echo "⬇️ Downloading NDK..."
+          wget -q --show-progress --retry-connrefused --tries=5 $NDK_URL -O ndk.zip
           unzip -q ndk.zip
-          rm -f ndk.zip
+          rm ndk.zip
 
-      - name: Set ANDROID_HOME and NDK env
+          echo "✅ SDK & NDK installed."
+
+      # --- Environment setup ---
+      - name: 🌍 Configure environment
         run: |
-          echo "ANDROID_HOME=$GITHUB_WORKSPACE/android-sdk" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=$GITHUB_WORKSPACE/android-sdk" >> $GITHUB_ENV
-          echo "ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk/android-ndk-r27c" >> $GITHUB_ENV
-          echo "PATH=$GITHUB_WORKSPACE/android-sdk/cmdline-tools/latest/bin:$GITHUB_WORKSPACE/android-sdk/platform-tools:$PATH" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$HOME/android" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$HOME/android/android-ndk-r27c" >> $GITHUB_ENV
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/android/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$HOME/android/platform-tools" >> $GITHUB_PATH
 
-      - name: Install Buildozer
+      # --- Accept licenses ---
+      - name: 📜 Accept Android licenses
+        run: yes | sdkmanager --licenses
+
+      # --- Install build tools ---
+      - name: 🔧 Install build-tools & platforms
         run: |
-          python3 -m pip install --upgrade pip
-          pip install buildozer cython
+          sdkmanager --install "build-tools;34.0.0" "platforms;android-34" "platform-tools"
+          sdkmanager --install "ndk;27.0.12077973"
 
-      - name: Patch libffi recipe (fix LT_SYS_SYMBOL_USCORE)
+      # --- Patch libffi recipe ---
+      - name: 🩹 Patch libffi recipe
         run: |
-          set -e
-          python3 patch_libffi.py
+          chmod +x .github/scripts/patch_libffi.py
+          .github/scripts/patch_libffi.py
 
-      - name: Build APK with Buildozer
+      # --- Build APK ---
+      - name: 🏗️ Build APK with p4a
         run: |
-          set -e
-          buildozer android debug
+          p4a apk \
+            --private . \
+            --package=org.smartlift \
+            --name="SmartLift" \
+            --version=1.0.0 \
+            --bootstrap=sdl2 \
+            --requirements=python3,kivy==2.2.1,pillow \
+            --orientation=portrait \
+            --sdk-dir=$ANDROID_SDK_ROOT \
+            --ndk-dir=$ANDROID_NDK_HOME \
+            --dist-name smartlift \
+            --arch arm64-v8a
 
-      - name: Upload APK artifact
+      # --- Upload artifact ---
+      - name: 📤 Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: SmartLift-APK
