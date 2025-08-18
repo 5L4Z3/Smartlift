@@ -1,255 +1,126 @@
-name: Build Android APK
+name: Android APK Build
 
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     env:
-      ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
-      ANDROID_NDK_ROOT: ${{ github.workspace }}/android-sdk/ndk/27.2.12479018
-      ANDROID_API: 33
-      NDK_API: 21
-      ANDROID_BUILD_TOOLS: 35.0.0
-      DIST_NAME: smartlift
-      APP_PACKAGE: org.example.smartlift
-      APP_NAME: SmartLift
-      APP_VERSION: "1.0"
+      SDK_URL: https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+      SDK_SHA: 15f4a3fddfd7ad62d3a5b450f8b93f4dbfa1f09d6e853b3c7bafbd8aab5b6b89
+      NDK_URL: https://dl.google.com/android/repository/android-ndk-r27c-linux.zip
+      NDK_SHA: 41036c703a9b3348b9fc46b5b86d744560d016aebf089f72bdf2a70eab2e726b
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      # ---- CACHES -----------------------------------------------------------
-      - name: Cache pip
-        uses: actions/cache@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          path: ~/.cache/pip
-          key: pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            pip-
+          python-version: "3.11"
 
-      - name: Cache Android SDK cmdline-tools
-        uses: actions/cache@v3
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            openjdk-17-jdk unzip wget git python3-pip python3-setuptools \
+            build-essential autoconf libtool pkg-config zlib1g-dev
+
+      - name: Cache Android SDK
         id: cache-sdk
+        uses: actions/cache@v4
         with:
-          path: android-sdk/cmdline-tools/latest
-          key: sdk-${{ env.ANDROID_API }}-${{ env.ANDROID_BUILD_TOOLS }}-${{ hashFiles('.github/workflows/android.yml') }}
-          restore-keys: |
-            sdk-
+          path: android-sdk
+          key: ${{ runner.os }}-android-sdk
 
-      - name: Cache Android NDK r27c
-        uses: actions/cache@v3
-        id: cache-ndk
-        with:
-          path: android-sdk/ndk/27.2.12479018
-          key: ndk-${{ env.NDK_API }}-27.2.12479018
-          restore-keys: |
-            ndk-
-
-      # Cache *per p4a dist* so we don’t rebuild unchanged natives
-      - name: Cache python-for-android dist
-        uses: actions/cache@v3
-        id: cache-p4a
-        with:
-          path: .p4a/dists/${{ env.DIST_NAME }}
-          key: p4a-${{ env.DIST_NAME }}-${{ env.ANDROID_API }}-${{ env.NDK_API }}-${{ hashFiles('main.py', 'whitelist.txt', 'Icon.png', 'Preplash.png') }}
-          restore-keys: |
-            p4a-${{ env.DIST_NAME }}-
-
-      # ---- PYTHON & SYSTEM DEPS --------------------------------------------
-      - name: Setup Python 3.10
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
-
-      - name: Install system dependencies (incl. full autotools)
+      - name: Download Android SDK (retry + checksum)
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
-          set -euo pipefail
-          sudo apt update -qq
-          sudo apt install -y \
-            unzip \
-            openjdk-17-jdk \
-            wget \
-            python3-pip \
-            libffi-dev \
-            libssl-dev \
-            libsqlite3-dev \
-            libjpeg-dev \
-            zlib1g-dev \
-            build-essential \
-            libgl1-mesa-dev \
-            autoconf \
-            automake \
-            libtool \
-            pkg-config \
-            m4
-
-      - name: Install Apache Ant (cached)
-        run: |
-          set -euo pipefail
-          ANT_DIR="${{ github.workspace }}/apache-ant-1.10.13"
-          if [ ! -d "$ANT_DIR" ]; then
-            wget https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.13-bin.tar.gz
-            tar -xzf apache-ant-1.10.13-bin.tar.gz
-          fi
-          echo "$ANT_DIR/bin" >> "$GITHUB_PATH"
-
-      - name: Install Cython and python-for-android (develop)
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          pip install Cython==0.29.33
-          pip install --upgrade "git+https://github.com/kivy/python-for-android.git@develop"
-
-      # ---- ANDROID SDK/NDK -------------------------------------------------
-      - name: Download Android SDK Command-line Tools (retry + checksum)
-        if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
-        run: |
-          set -euo pipefail
-          SDK_URL="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
-          # SHA256 of the file above:
-          SDK_SHA="bd1aa17c7ef10066949c88dc6c9c8d536be27f992a1f3b5a584f9bd2ba5646a0"
+          set -e
           mkdir -p android-sdk/cmdline-tools
           cd android-sdk/cmdline-tools
+
           for i in {1..5}; do
-            echo "Attempt $i: downloading Android SDK command-line tools..."
+            echo "Attempt $i: downloading Android SDK..."
             wget --timeout=30 --tries=3 "$SDK_URL" -O sdk.zip && break
-            echo "❌ Download failed, retrying in 15 seconds..."
-            rm -f sdk.zip || true
+            echo "❌ Download failed, retrying in 15s..."
+            rm -f sdk.zip
             sleep 15
           done
+
           if [ ! -f sdk.zip ]; then
             echo "❌ Failed to download SDK after 5 attempts"; exit 1
           fi
-          ACTUAL_SHA="$(sha256sum sdk.zip | cut -d' ' -f1)"
-          if [ "$ACTUAL_SHA" != "$SDK_SHA" ]; then
-            echo "❌ Checksum failed!"
-            echo "Expected: $SDK_SHA"
-            echo "Got:      $ACTUAL_SHA"
-            exit 1
-          fi
+
+          echo "$SDK_SHA  sdk.zip" | sha256sum -c --status || { echo "❌ SDK checksum failed"; exit 1; }
+
           unzip -q sdk.zip
           mkdir -p latest
           mv cmdline-tools/* latest/
-          rmdir cmdline-tools
+          rmdir cmdline-tools || true
           rm -f sdk.zip
 
-      - name: Add SDK tools to PATH
-        run: |
-          set -euo pipefail
-          echo "${{ github.workspace }}/android-sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "${{ github.workspace }}/android-sdk/platform-tools" >> "$GITHUB_PATH"
+      - name: Cache Android NDK
+        id: cache-ndk
+        uses: actions/cache@v4
+        with:
+          path: android-ndk
+          key: ${{ runner.os }}-android-ndk
 
-      - name: Accept Android SDK licenses
+      - name: Download Android NDK (retry + checksum)
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
         run: |
-          set -euo pipefail
-          mkdir -p "$ANDROID_SDK_ROOT/licenses"
-          # android-sdk-license (common two hashes)
-          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" >  "$ANDROID_SDK_ROOT/licenses/android-sdk-license"
-          echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> "$ANDROID_SDK_ROOT/licenses/android-sdk-license"
+          set -e
+          mkdir -p android-ndk
+          cd android-ndk
 
-      - name: Install SDK Components
-        if: ${{ steps.cache-sdk.outputs.cache-hit != 'true' }}
-        run: |
-          set -euo pipefail
-          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" \
-            "platform-tools" \
-            "platforms;android-${{ env.ANDROID_API }}" \
-            "build-tools;${{ env.ANDROID_BUILD_TOOLS }}"
-
-      - name: Download Android NDK r27c (retry + checksum)
-        if: ${{ steps.cache-ndk.outputs.cache-hit != 'true' }}
-        run: |
-          set -euo pipefail
-          NDK_URL="https://dl.google.com/android/repository/android-ndk-r27c-linux.zip"
-          # SHA256 for r27c linux zip:
-          NDK_SHA="59c2f6dc96743b5daf5d1626684640b20a6bd2b1d85b13156b90333741bad5cc"
-          mkdir -p "${{ github.workspace }}/android-sdk/ndk"
-          cd "${{ github.workspace }}/android-sdk/ndk"
           for i in {1..5}; do
-            echo "Attempt $i: downloading Android NDK r27c..."
+            echo "Attempt $i: downloading Android NDK..."
             wget --timeout=30 --tries=3 "$NDK_URL" -O ndk.zip && break
-            echo "❌ Download failed, retrying in 15 seconds..."
-            rm -f ndk.zip || true
+            echo "❌ Download failed, retrying in 15s..."
+            rm -f ndk.zip
             sleep 15
           done
+
           if [ ! -f ndk.zip ]; then
             echo "❌ Failed to download NDK after 5 attempts"; exit 1
           fi
-          ACTUAL_SHA="$(sha256sum ndk.zip | cut -d' ' -f1)"
-          if [ "$ACTUAL_SHA" != "$NDK_SHA" ]; then
-            echo "❌ Checksum failed!"
-            echo "Expected: $NDK_SHA"
-            echo "Got:      $ACTUAL_SHA"
-            exit 1
-          fi
+
+          echo "$NDK_SHA  ndk.zip" | sha256sum -c --status || { echo "❌ NDK checksum failed"; exit 1; }
+
           unzip -q ndk.zip
-          mv android-ndk-r27c 27.2.12479018
           rm -f ndk.zip
 
-      # ---- PATCH libffi RECIPE DETERMINISTICALLY ---------------------------
-      # With autotools installed the LT_SYS_SYMBOL_USCORE macro is available,
-      # but we also add the two harmless safety edits you already wanted.
-      - name: Patch libffi recipe (fail-fast)
+      - name: Set ANDROID_HOME and NDK env
         run: |
-          set -euo pipefail
-          P4A_DIR="$(python - <<'PY'
-import os, pythonforandroid
-print(os.path.dirname(pythonforandroid.__file__))
-PY
-)"
-          echo "python-for-android at: $P4A_DIR"
-          LIBFFI_RECIPE="$P4A_DIR/recipes/libffi/__init__.py"
-          if [ ! -f "$LIBFFI_RECIPE" ]; then
-            echo "❌ libffi recipe not found at $LIBFFI_RECIPE"
-            exit 1
-          fi
-          # 1) Insert env["HAVE_HIDDEN"] = "0" after the LDFLAGS line (idempotent)
-          if ! grep -q 'env\["HAVE_HIDDEN"\] = "0"' "$LIBFFI_RECIPE"; then
-            sed -i '/"LDFLAGS=/a\        env["HAVE_HIDDEN"] = "0"' "$LIBFFI_RECIPE"
-          fi
-          # 2) Add --disable-raw-api to configure flags (idempotent)
-          if ! grep -q '"--disable-raw-api"' "$LIBFFI_RECIPE"; then
-            sed -i 's/"--enable-shared"/"--enable-shared", "--disable-raw-api"/' "$LIBFFI_RECIPE"
-          fi
-          echo "✅ libffi recipe patched"
+          echo "ANDROID_HOME=$GITHUB_WORKSPACE/android-sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$GITHUB_WORKSPACE/android-sdk" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk/android-ndk-r27c" >> $GITHUB_ENV
+          echo "PATH=$GITHUB_WORKSPACE/android-sdk/cmdline-tools/latest/bin:$GITHUB_WORKSPACE/android-sdk/platform-tools:$PATH" >> $GITHUB_ENV
 
-      # ---- BUILD ------------------------------------------------------------
-      - name: Build APK with python-for-android
+      - name: Install Buildozer
         run: |
-          set -euo pipefail
-          p4a apk \
-            --private . \
-            --package="${APP_PACKAGE}" \
-            --name="${APP_NAME}" \
-            --version="${APP_VERSION}" \
-            --bootstrap=sdl2 \
-            --requirements=python3,kivy==2.2.1,pillow,sdl2 \
-            --arch=arm64-v8a \
-            --copy-libs \
-            --dist-name="${DIST_NAME}" \
-            --android-api="${ANDROID_API}" \
-            --ndk-api="${NDK_API}" \
-            --sdk-dir="${ANDROID_SDK_ROOT}" \
-            --ndk-dir="${ANDROID_NDK_ROOT}" \
-            --whitelist=whitelist.txt \
-            --presplash=Preplash.png \
-            --icon=Icon.png \
-            --orientation=portrait \
-            --permission=INTERNET \
-            --wakelock \
-            --release \
-            --color=always
+          python3 -m pip install --upgrade pip
+          pip install buildozer cython
 
-      - name: Upload APK
+      - name: Patch libffi recipe (fix LT_SYS_SYMBOL_USCORE)
+        run: |
+          set -e
+          python3 patch_libffi.py
+
+      - name: Build APK with Buildozer
+        run: |
+          set -e
+          buildozer android debug
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: SmartLift-APK
-          path: dist/${{ env.DIST_NAME }}/*.apk
-          if-no-files-found: error
+          path: bin/*.apk
