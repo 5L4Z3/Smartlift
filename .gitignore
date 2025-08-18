@@ -1,15 +1,20 @@
-# Build
+# python-for-android
 .p4a/
+.p4a_env/
+
+# Buildozer
+.buildozer/
+
+# Android SDK/NDK (CI-only; local paths vary)
+android-sdk/
+
+# Bytecode & OS
 __pycache__/
 *.pyc
-
-# APKs
-*.apk
-bin/
-
-# OS
 .DS_Store
 Thumbs.db
 
-# Android SDK/NDK (downloaded in CI)
-android-sdk/
+# APK outputs
+*.apk
+dist/
+bin/
