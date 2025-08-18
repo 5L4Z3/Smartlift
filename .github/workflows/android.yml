@@ -1,98 +1,55 @@
-name: Build Android APKs
+#!/usr/bin/env python3
+"""
+Patch the libffi recipe in python-for-android to fix the LT_SYS_SYMBOL_USCORE error.
+This script waits for the recipe to be created and patches it.
+"""
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+import os
+import time
+from pathlib import Path
 
-env:
-  ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-  ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-  ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-  ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+def wait_and_patch():
+    home = Path.home()
+    recipe_dir = home / ".local" / "share" / "python-for-android" / "recipes" / "libffi"
+    init_py = recipe_dir / "__init__.py"
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        abi: [arm64-v8a, armeabi-v7a, x86, x86_64]
+    print("⏳ Waiting for libffi recipe to be created...")
+    for _ in range(600):  # Wait up to 10 minutes
+        if init_py.exists():
+            break
+        time.sleep(10)
+    else:
+        print("❌ libffi recipe not found after 10 minutes!")
+        return
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    print(f"✅ Found libffi recipe at {init_py}")
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.10
+    # Read original file
+    with open(init_py, 'r') as f:
+        lines = f.readlines()
 
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y python3-pip git zip unzip libncurses5 libstdc++6 build-essential
-          pip install --upgrade pip
-          pip install buildozer python-for-android sh
+    # Patch
+    patched_lines = []
+    inserted_have_hidden = False
+    for line in lines:
+        patched_lines.append(line)
+        if '"LDFLAGS="' in line and not inserted_have_hidden:
+            patched_lines.append('        env["HAVE_HIDDEN"] = "0"\n')
+            inserted_have_hidden = True
 
-      - name: Save buildozer.spec backup
-        run: cp buildozer.spec buildozer.spec.bak
+    # Replace shared flag
+    patched_lines = [
+        line.replace('"--enable-shared"', '"--enable-shared", "--disable-raw-api"')
+        if '"--enable-shared"' in line and '"--disable-raw-api"' not in line
+        else line
+        for line in patched_lines
+    ]
 
-      - name: Update buildozer.spec ABI
-        run: |
-          sed -i "s/^# *android.arch =.*/android.arch = ${MATRIX_ABI}/" buildozer.spec
+    # Write patched file
+    with open(init_py, 'w') as f:
+        f.writelines(patched_lines)
 
-      - name: Decode and save keystore
-        if: env.ANDROID_KEYSTORE_BASE64 != ''
-        run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android.keystore
+    print("✅ libffi recipe patched successfully! Ready for build.")
 
-      - name: Patch libffi recipe (if needed)
-        run: |
-          chmod +x .github/scripts/patch_libffi.py
-          python3 .github/scripts/patch_libffi.py
-
-      - name: Build APK
-        run: |
-          buildozer android debug
-
-      - name: Upload ABI-specific APK
-        uses: actions/upload-artifact@v3
-        with:
-          name: APK-${{ matrix.abi }}
-          path: bin/*.apk
-
-  universal:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.10
-
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y python3-pip git zip unzip libncurses5 libstdc++6 build-essential
-          pip install --upgrade pip
-          pip install buildozer python-for-android sh
-
-      - name: Decode and save keystore
-        if: env.ANDROID_KEYSTORE_BASE64 != ''
-        run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android.keystore
-
-      - name: Build universal APK
-        run: |
-          sed -i 's/^# *android.arch =.*/android.arch = all/' buildozer.spec
-          buildozer android debug
-
-      - name: Upload universal APK
-        uses: actions/upload-artifact@v3
-        with:
-          name: APK-universal
-          path: bin/*.apk
+if __name__ == "__main__":
+    wait_and_patch()
