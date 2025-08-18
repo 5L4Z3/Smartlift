@@ -1,55 +1,93 @@
-#!/usr/bin/env python3
-"""
-Patch the libffi recipe in python-for-android to fix the LT_SYS_SYMBOL_USCORE error.
-This script waits for the recipe to be created and patches it.
-"""
+name: Android Build
 
-import os
-import time
-from pathlib import Path
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
-def wait_and_patch():
-    home = Path.home()
-    recipe_dir = home / ".local" / "share" / "python-for-android" / "recipes" / "libffi"
-    init_py = recipe_dir / "__init__.py"
+env:
+  ANDROID_HOME: /usr/local/android-sdk
+  ANDROID_NDK_HOME: /usr/local/android-ndk
 
-    print("⏳ Waiting for libffi recipe to be created...")
-    for _ in range(600):  # Wait up to 10 minutes
-        if init_py.exists():
-            break
-        time.sleep(10)
-    else:
-        print("❌ libffi recipe not found after 10 minutes!")
-        return
+jobs:
+  build:
+    name: Build APKs
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        abi: [x86, x86_64, armeabi-v7a, arm64-v8a]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    print(f"✅ Found libffi recipe at {init_py}")
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.10
 
-    # Read original file
-    with open(init_py, 'r') as f:
-        lines = f.readlines()
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y zip unzip default-jdk git curl
 
-    # Patch
-    patched_lines = []
-    inserted_have_hidden = False
-    for line in lines:
-        patched_lines.append(line)
-        if '"LDFLAGS="' in line and not inserted_have_hidden:
-            patched_lines.append('        env["HAVE_HIDDEN"] = "0"\n')
-            inserted_have_hidden = True
+      - name: Install python-for-android & Buildozer
+        run: |
+          pip install --upgrade pip
+          pip install python-for-android buildozer
 
-    # Replace shared flag
-    patched_lines = [
-        line.replace('"--enable-shared"', '"--enable-shared", "--disable-raw-api"')
-        if '"--enable-shared"' in line and '"--disable-raw-api"' not in line
-        else line
-        for line in patched_lines
-    ]
+      - name: Make patch_libffi executable
+        run: chmod +x .github/scripts/patch_libffi.py
 
-    # Write patched file
-    with open(init_py, 'w') as f:
-        f.writelines(patched_lines)
+      - name: Patch libffi
+        run: .github/scripts/patch_libffi.py
 
-    print("✅ libffi recipe patched successfully! Ready for build.")
+      - name: Update buildozer.spec for ABI
+        run: |
+          cp buildozer.spec buildozer.spec.bak
+          sed -i "s/^android.arch = .*/android.arch = ${MATRIX_ABI}/" buildozer.spec
 
-if __name__ == "__main__":
-    wait_and_patch()
+      - name: Build APK
+        run: |
+          buildozer android debug
+
+      - name: Upload ABI APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartlift-${{ matrix.abi }}
+          path: bin/*.apk
+
+  universal:
+    name: Universal APK
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download ABI APKs
+        uses: actions/download-artifact@v4
+        with:
+          path: bin
+
+      - name: Install Bundletool
+        run: |
+          curl -L -o bundletool.jar https://github.com/google/bundletool/releases/download/1.16.1/bundletool-all-1.16.1.jar
+
+      - name: Generate universal APK
+        run: |
+          mkdir merged
+          java -jar bundletool.jar build-apks \
+              --mode=universal \
+              --output=merged/smartlift.universal.apks \
+              --bundle=bin/smartlift.aab \
+              --ks=$ANDROID_KEYSTORE \
+              --ks-key-alias=$KEY_ALIAS \
+              --ks-pass=pass:$KEYSTORE_PASS \
+              --key-pass=pass:$KEY_PASS
+          unzip merged/smartlift.universal.apks -d merged/
+
+      - name: Upload universal APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartlift-universal
+          path: merged/universal.apk
