@@ -1,320 +1,162 @@
-name: Android per-ABI + Universal APK Build
+name: Build Android APK
 
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch:
 
-env:
-  # Global pins (change here to upgrade)
-  ANDROID_API: "33"
-  ANDROID_BUILD_TOOLS: "35.0.0"
-  ANDROID_NDK_VERSION: "27.2.12479018"
-  NDK_API: "21"
-  SDK_URL: "https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
-  SDK_SHA: "15f4a3fddfd7ad62d3a5b450f8b93f4dbfa1f09d6e853b3c7bafbd8aab5b6b89"
-  NDK_URL: "https://dl.google.com/android/repository/android-ndk-r27c-linux.zip"
-  NDK_SHA: "ac3025e28bcdb1c2fdc61ac5b7a5b0575870b798baf4f1b594a4db78b82b45a6"
-  BUNDLETOOL_URL: "https://github.com/google/bundletool/releases/download/1.16.0/bundletool-all-1.16.0.jar"
-
 jobs:
-  build-per-arch:
-    name: Build per-ABI APKs
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-22.04
     strategy:
-      fail-fast: false
       matrix:
-        arch: ["armeabi-v7a", "arm64-v8a", "x86_64"]
+        abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
+    name: Build APK (${{ matrix.abi }})
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('requirements.txt', 'buildozer.spec', 'main.py') }}
-          restore-keys: |
-            pip-${{ runner.os }}-
-
-      - name: Cache SDK cmdline-tools
-        id: cache-sdk
-        uses: actions/cache@v4
-        with:
-          path: android-sdk/cmdline-tools/latest
-          key: sdk-${{ env.ANDROID_API }}-${{ env.ANDROID_BUILD_TOOLS }}-${{ runner.os }}
-          restore-keys: |
-            sdk-${{ runner.os }}
-
-      - name: Cache NDK
-        id: cache-ndk
-        uses: actions/cache@v4
-        with:
-          path: android-sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
-          key: ndk-${{ env.ANDROID_NDK_VERSION }}-${{ runner.os }}
-          restore-keys: |
-            ndk-${{ runner.os }}
-
-      - name: Cache p4a dist (per-arch)
-        id: cache-p4a
-        uses: actions/cache@v4
-        with:
-          path: .p4a/dists/smartlift-${{ matrix.arch }}
-          key: p4a-smartlift-${{ matrix.arch }}-${{ runner.os }}-${{ hashFiles('buildozer.spec', 'main.py') }}
-          restore-keys: |
-            p4a-smartlift-${{ matrix.arch }}-${{ runner.os }}-
-
-      - name: Setup Python 3.10
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
-      - name: Install system packages
+      - name: Install system dependencies
         run: |
-          set -euo pipefail
-          sudo apt update -qq
-          sudo apt install -y unzip openjdk-17-jdk wget python3-pip libffi-dev libssl-dev \
-            libsqlite3-dev libjpeg-dev zlib1g-dev build-essential libgl1-mesa-dev \
-            autoconf automake libtool pkg-config zip
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            git \
+            unzip \
+            openjdk-17-jdk \
+            zip \
+            libffi-dev \
+            libssl-dev \
+            libsqlite3-dev \
+            liblzma-dev \
+            zlib1g-dev \
+            libbz2-dev \
+            wget \
+            curl
 
-      - name: Install Cython & python-for-android
+      - name: Install pip dependencies
         run: |
-          set -euo pipefail
           python -m pip install --upgrade pip
-          pip install "Cython==0.29.33"
-          pip install --upgrade "git+https://github.com/kivy/python-for-android.git@develop"
+          pip install Cython==0.29.33
+          pip install buildozer
 
-      - name: Download Android SDK cmdline-tools (retry + checksum)
-        if: steps.cache-sdk.outputs.cache-hit != 'true'
+      - name: Prepare Buildozer spec
         run: |
-          set -euo pipefail
-          mkdir -p "${{ github.workspace }}/android-sdk/cmdline-tools"
-          cd "${{ github.workspace }}/android-sdk/cmdline-tools"
-          for i in {1..5}; do
-            echo "Attempt $i: downloading SDK..."
-            wget --timeout=30 --tries=3 "$SDK_URL" -O sdk.zip && break || true
-            echo "Retrying in 10s..." ; rm -f sdk.zip ; sleep 10
-          done
-          [ -f sdk.zip ] || (echo "SDK download failed" && exit 1)
-          echo "${SDK_SHA}  sdk.zip" | sha256sum -c --status || (echo "SDK checksum mismatch" && exit 1)
-          unzip -q sdk.zip
-          mkdir -p latest
-          mv cmdline-tools/* latest/
-          rmdir cmdline-tools || true
-          rm -f sdk.zip
+          cp buildozer.spec buildozer.spec.bak
+          sed -i "s/^# *android.arch =.*/android.arch = ${matrix.abi}/" buildozer.spec || echo "android.arch = ${matrix.abi}" >> buildozer.spec
 
-      - name: Add SDK tools to PATH
+      - name: Build APK (${{ matrix.abi }})
         run: |
-          echo "${{ github.workspace }}/android-sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "${{ github.workspace }}/android-sdk/platform-tools" >> "$GITHUB_PATH"
+          buildozer android release
+          ls -lh bin/
 
-      - name: Accept licenses
+      - name: Decode Keystore
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         run: |
-          set -euo pipefail
-          mkdir -p "${{ github.workspace }}/android-sdk/licenses"
-          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "${{ github.workspace }}/android-sdk/licenses/android-sdk-license"
-          echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> "${{ github.workspace }}/android-sdk/licenses/android-sdk-license"
-
-      - name: Download Android NDK r27c (retry + checksum)
-        if: steps.cache-ndk.outputs.cache-hit != 'true'
-        run: |
-          set -euo pipefail
-          mkdir -p "${{ github.workspace }}/android-sdk/ndk"
-          cd "${{ github.workspace }}/android-sdk/ndk"
-          for i in {1..5}; do
-            echo "Attempt $i: downloading NDK..."
-            wget --timeout=30 --tries=3 "$NDK_URL" -O ndk.zip && break || true
-            echo "Retrying in 10s..." ; rm -f ndk.zip ; sleep 10
-          done
-          [ -f ndk.zip ] || (echo "NDK download failed" && exit 1)
-          echo "${NDK_SHA}  ndk.zip" | sha256sum -c --status || (echo "NDK checksum mismatch" && exit 1)
-          unzip -q ndk.zip
-          mv android-ndk-r27c "${{ env.ANDROID_NDK_VERSION }}"
-          rm -f ndk.zip
-
-      - name: Build APK (per-ABI)
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > keystore.jks
         env:
-          ANDROID_NDK_ROOT: ${{ github.workspace }}/android-sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
+      - name: Sign APK (${{ matrix.abi }})
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         run: |
-          set -euo pipefail
-          echo "Building ABI: ${matrix.arch}"
-          p4a apk \
-            --private . \
-            --package=org.example.smartlift \
-            --name="SmartLift" \
-            --version=1.0 \
-            --bootstrap=sdl2 \
-            --requirements=python3,kivy==2.2.1,pillow,sdl2 \
-            --arch="${{ matrix.arch }}" \
-            --copy-libs \
-            --dist-name="smartlift-${{ matrix.arch }}" \
-            --android-api="${{ env.ANDROID_API }}" \
-            --ndk-api="${{ env.NDK_API }}" \
-            --sdk-dir="${{ github.workspace }}/android-sdk" \
-            --ndk-dir="${{ github.workspace }}/android-sdk/ndk/${{ env.ANDROID_NDK_VERSION }}" \
-            --whitelist=whitelist.txt \
-            --presplash=Preplash.png \
-            --icon=Icon.png \
-            --orientation=portrait \
-            --permission=INTERNET \
-            --wakelock \
-            --release \
-            --color=always
-
-      - name: Upload APK artifact (per-ABI)
-        uses: actions/upload-artifact@v4
-        with:
-          name: smartlift-${{ matrix.arch }}-apk
-          path: dist/smartlift-${{ matrix.arch }}/*.apk
-          if-no-files-found: error
-
-  build-aab-universal:
-    name: Build multi-ABI AAB + Universal APK
-    runs-on: ubuntu-latest
-    needs: build-per-arch
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python 3.10
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Install system packages
-        run: |
-          set -euo pipefail
-          sudo apt update -qq
-          sudo apt install -y unzip openjdk-17-jdk wget python3-pip libffi-dev libssl-dev \
-            libsqlite3-dev libjpeg-dev zlib1g-dev build-essential libgl1-mesa-dev autoconf \
-            automake libtool pkg-config zip
-
-      - name: Install Cython & python-for-android
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          pip install "Cython==0.29.33"
-          pip install --upgrade "git+https://github.com/kivy/python-for-android.git@develop"
-
-      - name: Download SDK cmdline-tools (if needed)
-        if: ${{ always() }}
-        run: |
-          set -euo pipefail
-          mkdir -p "${{ github.workspace }}/android-sdk/cmdline-tools"
-          cd "${{ github.workspace }}/android-sdk/cmdline-tools"
-          for i in {1..5}; do
-            wget --timeout=30 --tries=3 "$SDK_URL" -O sdk.zip && break || true
-            rm -f sdk.zip; sleep 5
+          for apk in bin/*.apk; do
+            echo "🔑 Signing $apk"
+            apksigner sign \
+              --ks keystore.jks \
+              --ks-key-alias "$KEY_ALIAS" \
+              --ks-pass pass:"$KEYSTORE_PASSWORD" \
+              --key-pass pass:"$KEY_PASSWORD" \
+              "$apk"
           done
-          [ -f sdk.zip ] || true
-          if [ -f sdk.zip ]; then
-            echo "${SDK_SHA}  sdk.zip" | sha256sum -c --status || (echo "SDK checksum mismatch" && exit 1)
-            unzip -q sdk.zip
-            mkdir -p latest
-            mv cmdline-tools/* latest/ || true
-            rm -f sdk.zip
-          fi
-          echo "${{ github.workspace }}/android-sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "${{ github.workspace }}/android-sdk/platform-tools" >> "$GITHUB_PATH"
-
-      - name: Download NDK (if needed)
-        run: |
-          set -euo pipefail
-          mkdir -p "${{ github.workspace }}/android-sdk/ndk"
-          cd "${{ github.workspace }}/android-sdk/ndk"
-          for i in {1..5}; do
-            wget --timeout=30 --tries=3 "$NDK_URL" -O ndk.zip && break || true
-            rm -f ndk.zip; sleep 5
-          done
-          if [ -f ndk.zip ]; then
-            echo "${NDK_SHA}  ndk.zip" | sha256sum -c --status || (echo "NDK checksum mismatch" && exit 1)
-            unzip -q ndk.zip
-            mv android-ndk-r27c "${{ env.ANDROID_NDK_VERSION }}"
-            rm -f ndk.zip
-          fi
-
-      - name: Build multi-ABI AAB
         env:
-          ANDROID_NDK_ROOT: ${{ github.workspace }}/android-sdk/ndk/${{ env.ANDROID_NDK_VERSION }}
-        run: |
-          set -euo pipefail
-          p4a aab \
-            --private . \
-            --package=org.example.smartlift \
-            --name="SmartLift" \
-            --version=1.0 \
-            --bootstrap=sdl2 \
-            --requirements=python3,kivy==2.2.1,pillow,sdl2 \
-            --arch=arm64-v8a,armeabi-v7a,x86_64 \
-            --copy-libs \
-            --dist-name="smartlift" \
-            --android-api="${{ env.ANDROID_API }}" \
-            --ndk-api="${{ env.NDK_API }}" \
-            --sdk-dir="${{ github.workspace }}/android-sdk" \
-            --ndk-dir="${{ github.workspace }}/android-sdk/ndk/${{ env.ANDROID_NDK_VERSION }}" \
-            --whitelist=whitelist.txt \
-            --presplash=Preplash.png \
-            --icon=Icon.png \
-            --orientation=portrait \
-            --permission=INTERNET \
-            --wakelock \
-            --release \
-            --color=always
-
-      - name: Decode and write keystore from GH Secrets
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
-        env:
-          JKS_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          set -euo pipefail
-          echo "$JKS_BASE64" | base64 -d > keystore.jks
-          chmod 600 keystore.jks
-
-      - name: Download bundletool
-        run: |
-          set -euo pipefail
-          wget -q -O bundletool.jar "$BUNDLETOOL_URL"
-
-      - name: Create universal APK from AAB (signed with keystore from secrets)
-        env:
-          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASS: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
-        run: |
-          set -euo pipefail
-          AAB_PATH=$(ls -1 dist/smartlift/*.aab | head -n 1 || true)
-          if [ -z "$AAB_PATH" ]; then
-            echo "❌ AAB not found in dist/smartlift"
-            exit 1
-          fi
-          echo "AAB: $AAB_PATH"
-          # build-apks (universal) signed with provided keystore (if present)
-          if [ -f keystore.jks ]; then
-            java -jar bundletool.jar build-apks \
-              --bundle="$AAB_PATH" \
-              --output="dist/smartlift/universal.apks" \
-              --mode=universal \
-              --ks=keystore.jks \
-              --ks-pass="pass:$KS_PASS" \
-              --ks-key-alias="$KEY_ALIAS" \
-              --key-pass="pass:$KEY_PASS"
-          else
-            java -jar bundletool.jar build-apks \
-              --bundle="$AAB_PATH" \
-              --output="dist/smartlift/universal.apks" \
-              --mode=universal
-          fi
-          cd dist/smartlift
-          unzip -o universal.apks universal.apk
-          mv universal.apk SmartLift-universal.apk
-          ls -la
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
-      - name: Upload AAB + Universal APK
+      - name: Upload per-ABI APK
         uses: actions/upload-artifact@v4
         with:
-          name: SmartLift-AAB-and-Universal
-          path: |
-            dist/smartlift/*.aab
-            dist/smartlift/SmartLift-universal.apk
-          if-no-files-found: error
+          name: SmartLift-${{ matrix.abi }}
+          path: bin/*.apk
+
+  universal:
+    runs-on: ubuntu-22.04
+    needs: build
+    name: Build Universal APK
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            git \
+            unzip \
+            openjdk-17-jdk \
+            zip \
+            libffi-dev \
+            libssl-dev \
+            libsqlite3-dev \
+            liblzma-dev \
+            zlib1g-dev \
+            libbz2-dev \
+            wget \
+            curl
+
+      - name: Install pip dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install Cython==0.29.33
+          pip install buildozer
+
+      - name: Build Universal APK
+        run: |
+          buildozer android release --universal
+          ls -lh bin/
+
+      - name: Decode Keystore
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > keystore.jks
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
+      - name: Sign Universal APK
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          for apk in bin/*.apk; do
+            echo "🔑 Signing $apk"
+            apksigner sign \
+              --ks keystore.jks \
+              --ks-key-alias "$KEY_ALIAS" \
+              --ks-pass pass:"$KEYSTORE_PASSWORD" \
+              --key-pass pass:"$KEY_PASSWORD" \
+              "$apk"
+          done
+        env:
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Upload Universal APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartLift-universal
+          path: bin/*.apk
