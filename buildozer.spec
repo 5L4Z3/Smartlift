@@ -11,7 +11,7 @@ package.domain = com.yourdomain
 # (str) Source code directory
 source.dir = .
 
-# (list) Source files to include (let empty to include all)
+# (list) Source files to include (leave empty to include all)
 source.include_exts = py,png,jpg,kv,atlas
 
 # (str) Application versioning (method 1)
@@ -26,18 +26,19 @@ entrypoint = main.py
 # (str) Supported orientation
 orientation = portrait
 
-# (str) Android API target
+# (int) Android API level
 android.api = 33
 android.ndk = 25b
 android.minapi = 21
 android.sdk = 33
-android.arch = arm64-v8a  # Default, overwritten by workflow matrix
+
+# (str) Default architecture; workflow will override this per-ABI
+android.arch = arm64-v8a
 
 # (bool) Include universal APK
 android.multiple_apks = True
 
 # (str) Keystore (for release builds via GH Secrets)
-# Uncomment and use workflow environment variables when signing:
 # android.keystore = ${ANDROID_KEYSTORE}
 # android.keyalias = ${ANDROID_KEY_ALIAS}
 # android.keyalias_password = ${ANDROID_KEY_PASSWORD}
