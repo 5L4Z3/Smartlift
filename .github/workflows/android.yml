@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Android Build
 
 on:
   push:
@@ -10,50 +10,39 @@ jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
         abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.12"
+          python-version: "3.10"
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            git \
-            zip \
-            unzip \
-            openjdk-17-jdk \
-            python3-pip \
-            python3-setuptools \
-            python3-wheel
-          pip install --upgrade pip
-          pip install buildozer cython==0.29.36 virtualenv
+          sudo apt update
+          sudo apt install -y openjdk-17-jdk unzip zip libltdl-dev
+          python -m pip install --upgrade pip
+          pip install buildozer cython
 
       - name: Run libffi patch
         run: python .github/scripts/patch_libffi.py
 
-      - name: Set Android Arch
-        run: sed -i "s/^android.arch =.*/android.arch = ${{ matrix.abi }}/" buildozer.spec
+      - name: Configure ABI
+        run: |
+          sed -i "s/^#* *android.arch =.*/android.arch = ${matrix.abi}/" buildozer.spec
 
-      - name: Debug - confirm arch set
-        run: grep "android.arch" buildozer.spec
-
-      - name: Build per-ABI APK
+      - name: Build APK for ${{ matrix.abi }}
         run: buildozer android release
 
-      - name: Upload per-ABI APKs
-        uses: actions/upload-artifact@v4
+      - name: Upload ABI-specific APK
+        uses: actions/upload-artifact@v3
         with:
-          name: smartlift-${{ matrix.abi }}
+          name: SmartLift-${{ matrix.abi }}
           path: bin/*.apk
 
   universal:
@@ -61,43 +50,33 @@ jobs:
     needs: build
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.12"
+          python-version: "3.10"
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            git \
-            zip \
-            unzip \
-            openjdk-17-jdk \
-            python3-pip \
-            python3-setuptools \
-            python3-wheel
-          pip install --upgrade pip
-          pip install buildozer cython==0.29.36 virtualenv
+          sudo apt update
+          sudo apt install -y openjdk-17-jdk unzip zip libltdl-dev
+          python -m pip install --upgrade pip
+          pip install buildozer cython
 
       - name: Run libffi patch
         run: python .github/scripts/patch_libffi.py
 
-      - name: Enable universal APK build
-        run: sed -i "s/^android.arch =.*/android.arch = all/" buildozer.spec
-
-      - name: Debug - confirm universal arch
-        run: grep "android.arch" buildozer.spec
+      - name: Enable universal build
+        run: |
+          sed -i "s/^#* *android.arch =.*/# android.arch = all/" buildozer.spec
 
       - name: Build universal APK
         run: buildozer android release
 
-      - name: Upload universal APK
-        uses: actions/upload-artifact@v4
+      - name: Upload Universal APK
+        uses: actions/upload-artifact@v3
         with:
-          name: smartlift-universal
+          name: SmartLift-universal
           path: bin/*.apk
