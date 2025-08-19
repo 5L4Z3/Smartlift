@@ -1,52 +1,79 @@
-[app]
-# (str) Title of your application
-title = SmartLift
+name: Build SmartLift APKs
 
-# (str) Package name
-package.name = smartlift
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 
-# (str) Package domain (unique identifier)
-package.domain = com.yourdomain
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86, x86_64]
 
-# (str) Source code directory
-source.dir = .
+    steps:
+      # 1️⃣ Checkout repo
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-# (list) Source files to include (let empty to include all)
-source.include_exts = py,png,jpg,kv,atlas
+      # 2️⃣ Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
 
-# (str) Application versioning (method 1)
-version = 1.0.0
+      # 3️⃣ Install Buildozer and python-for-android
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install buildozer python-for-android
 
-# (str) Application requirements
-requirements = python3,kivy,buildozer,python-for-android
+      # 4️⃣ Apply libffi patch
+      - name: Run libffi patch
+        run: python .github/scripts/patch_libffi.py
 
-# (str) Entry point of the app
-entrypoint = main.py
+      # 5️⃣ Set ABI in buildozer.spec and build APK
+      - name: Build APK for ${{ matrix.abi }}
+        run: |
+          sed -i "s/^#* *android.arch =.*/android.arch = ${matrix.abi}/" buildozer.spec
+          buildozer android debug
 
-# (str) Supported orientation
-orientation = portrait
+      # 6️⃣ Upload per-ABI APK
+      - name: Upload per-ABI APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ matrix.abi }}
+          path: bin/*.apk
 
-# (str) Android API target
-android.api = 33
-android.ndk = 25b
-android.minapi = 21
-android.sdk = 33
-android.arch = arm64-v8a  # Default, overwritten by workflow matrix
+  universal:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-# (bool) Include universal APK
-android.multiple_apks = True
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
 
-# (str) Keystore (for release builds via GH Secrets)
-# Uncomment and use workflow environment variables when signing:
-# android.keystore = ${ANDROID_KEYSTORE}
-# android.keyalias = ${ANDROID_KEY_ALIAS}
-# android.keyalias_password = ${ANDROID_KEY_PASSWORD}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install buildozer python-for-android
 
-# (list) Permissions
-android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
+      - name: Run libffi patch
+        run: python .github/scripts/patch_libffi.py
 
-# (str) Presplash image
-presplash.filename = %(source.dir)s/images/presplash.png
+      - name: Build universal APK
+        run: |
+          sed -i "s/^#* *android.arch =.*/android.arch = all/" buildozer.spec
+          buildozer android debug
 
-# (str) Icon
-icon.filename = %(source.dir)s/images/icon.png
+      - name: Upload universal APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-universal
+          path: bin/*.apk
