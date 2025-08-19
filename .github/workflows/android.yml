@@ -10,6 +10,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false   # ✅ don't cancel all builds if one ABI fails
       matrix:
         abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
 
