@@ -1,20 +1,18 @@
-import os
+#!/usr/bin/env python3
+"""
+Patch libffi to fix AC_CONFIG_HEADERS issue in Python-for-Android builds.
+"""
 
-# Path to libffi configure file inside buildozer/.buildozer
-libffi_dir = os.path.expanduser("~/.buildozer/android/platform/build-arm64-v8a/build/other_builds/libffi/armeabi-v7a/libffi")
-configure_ac = os.path.join(libffi_dir, "configure.ac")
+input_file = "recipes/libffi/libffi-3.4.2/configure.ac"
+output_file = input_file + ".patched"
 
-if os.path.exists(configure_ac):
-    with open(configure_ac, "r") as f:
-        lines = f.readlines()
+with open(input_file, "r") as f_in, open(output_file, "w") as f_out:
+    for line in f_in:
+        # Replace AM_CONFIG_HEADER with AC_CONFIG_HEADERS safely
+        f_out.write(line.replace("AM_CONFIG_HEADER", "AC_CONFIG_HEADERS"))
 
-    with open(configure_ac, "w") as f:
-        for line in lines:
-            if "AM_CONFIG_HEADER" in line:
-                f.write(line.replace("AM_CONFIG_HEADER", "AC_CONFIG_HEADERS"))
-            else:
-                f.write(line)
+# Replace original file
+import shutil
+shutil.move(output_file, input_file)
 
-    print("✅ Successfully patched libffi configure.ac")
-else:
-    print("⚠️ configure.ac not found at:", configure_ac)
+print("[patch_libffi.py] libffi patched successfully.")
