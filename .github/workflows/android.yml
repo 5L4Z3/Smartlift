@@ -1,83 +1,52 @@
-name: Android Build
+[app]
+# (str) Title of your application
+title = SmartLift
 
-on:
-  push:
-    branches:
-      - main
-  pull_request:
+# (str) Package name
+package.name = smartlift
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false   # ✅ don't cancel all builds if one ABI fails
-      matrix:
-        abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
+# (str) Package domain (unique identifier)
+package.domain = com.yourdomain
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+# (str) Source code directory
+source.dir = .
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
+# (list) Source files to include (let empty to include all)
+source.include_exts = py,png,jpg,kv,atlas
 
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y openjdk-17-jdk unzip zip libltdl-dev
-          python -m pip install --upgrade pip
-          pip install buildozer cython
+# (str) Application versioning (method 1)
+version = 1.0.0
 
-      - name: Run libffi patch
-        run: python .github/scripts/patch_libffi.py
+# (str) Application requirements
+requirements = python3,kivy,buildozer,python-for-android
 
-      - name: Configure ABI
-        run: |
-          sed -i "s/^#* *android.arch =.*/android.arch = ${matrix.abi}/" buildozer.spec
+# (str) Entry point of the app
+entrypoint = main.py
 
-      - name: Build APK for ${{ matrix.abi }}
-        run: buildozer android release
+# (str) Supported orientation
+orientation = portrait
 
-      - name: Upload ABI-specific APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: SmartLift-${{ matrix.abi }}
-          path: bin/*.apk
+# (str) Android API target
+android.api = 33
+android.ndk = 25b
+android.minapi = 21
+android.sdk = 33
+android.arch = arm64-v8a  # Default, overwritten by workflow matrix
 
-  universal:
-    runs-on: ubuntu-latest
-    needs: build
+# (bool) Include universal APK
+android.multiple_apks = True
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+# (str) Keystore (for release builds via GH Secrets)
+# Uncomment and use workflow environment variables when signing:
+# android.keystore = ${ANDROID_KEYSTORE}
+# android.keyalias = ${ANDROID_KEY_ALIAS}
+# android.keyalias_password = ${ANDROID_KEY_PASSWORD}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
+# (list) Permissions
+android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y openjdk-17-jdk unzip zip libltdl-dev
-          python -m pip install --upgrade pip
-          pip install buildozer cython
+# (str) Presplash image
+presplash.filename = %(source.dir)s/images/presplash.png
 
-      - name: Run libffi patch
-        run: python .github/scripts/patch_libffi.py
-
-      - name: Enable universal build
-        run: |
-          sed -i "s/^#* *android.arch =.*/# android.arch = all/" buildozer.spec
-
-      - name: Build universal APK
-        run: buildozer android release
-
-      - name: Upload Universal APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: SmartLift-universal
-          path: bin/*.apk
+# (str) Icon
+icon.filename = %(source.dir)s/images/icon.png
