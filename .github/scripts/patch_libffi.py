@@ -1,56 +1,18 @@
-#!/usr/bin/env python3
-"""
-Patch the libffi recipe in python-for-android to fix the LT_SYS_SYMBOL_USCORE error.
-This script runs in the background and waits for the recipe to be created.
-"""
-
 import os
-import time
-from pathlib import Path
+import fileinput
 
-def wait_and_patch():
-    home = Path.home()
-    recipe_dir = home / ".local" / "share" / "python-for-android" / "recipes" / "libffi"
-    init_py = recipe_dir / "__init__.py"
+def patch_libffi():
+    print("Patching libffi if needed...")
 
-    print("⏳ Waiting for libffi recipe to be created...")
-    for _ in range(600):  # Wait up to 10 minutes
-        if init_py.exists():
-            break
-        time.sleep(10)
-    else:
-        print("❌ libffi recipe not found after 10 minutes!")
-        return
-
-    print(f"✅ Found libffi recipe at {init_py}")
-    
-    # Read the original file
-    with open(init_py, 'r') as f:
-        lines = f.readlines()
-
-    # Apply the patches
-    patched_lines = []
-    inserted_have_hidden = False
-    for line in lines:
-        patched_lines.append(line)
-        # Insert env["HAVE_HIDDEN"] = "0" after the LDFLAGS line
-        if '"LDFLAGS="' in line and not inserted_have_hidden:
-            patched_lines.append('        env["HAVE_HIDDEN"] = "0"\n')
-            inserted_have_hidden = True
-    
-    # Replace the shared flag
-    patched_lines = [
-        line.replace('"--enable-shared"', '"--enable-shared", "--disable-raw-api"')
-        if '"--enable-shared"' in line and '"--disable-raw-api"' not in line
-        else line
-        for line in patched_lines
-    ]
-
-    # Write the patched file
-    with open(init_py, 'w') as f:
-        f.writelines(patched_lines)
-    
-    print("✅ libffi recipe patched successfully! Ready for build.")
+    for root, dirs, files in os.walk("~/.buildozer"):
+        for filename in files:
+            if filename.endswith("configure.ac") or filename.endswith("configure.in"):
+                filepath = os.path.expanduser(os.path.join(root, filename))
+                print(f"Patching {filepath}")
+                with fileinput.FileInput(filepath, inplace=True) as file:
+                    for line in file:
+                        # Example fix for certain libffi issues
+                        print(line.replace("AM_CONFIG_HEADER", "AC_CONFIG_HEADERS"), end=")
 
 if __name__ == "__main__":
-    wait_and_patch()
+    patch_libffi()
