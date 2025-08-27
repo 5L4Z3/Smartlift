@@ -1,4 +1,4 @@
-name: Build Android APKs
+name: Build Android APK
 
 on:
   push:
@@ -8,14 +8,13 @@ on:
 
 jobs:
   build:
-    name: Build APKs
+    name: Build APK (${{ matrix.abi }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
         abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
-
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -28,18 +27,64 @@ jobs:
           python -m pip install --upgrade pip
           pip install buildozer python-for-android
 
-      - name: Patch libffi
-        run: python .github/scripts/patch_libffi.py
+      - name: Run libffi patch
+        run: python .github/scripts/patch_libffi.py || echo "Skipping patch"
 
-      - name: Update buildozer.arch
-        run: |
-          sed -i "s/^#* *android.arch =.*/android.arch = ${matrix.abi}/" buildozer.spec
+      - name: Update buildozer.spec for ABI
+        run: sed -i "s/^#* *android.arch =.*/android.arch = ${{ matrix.abi }}/" buildozer.spec
 
       - name: Build APK
         run: buildozer android debug
 
-      - name: Upload APK artifact
+      - name: Upload per-ABI APK
         uses: actions/upload-artifact@v4
         with:
           name: APK-${{ matrix.abi }}
           path: bin/*.apk
+
+  universal-apk:
+    name: Create Universal APK
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install apktool
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apktool zipalign
+
+      - name: Download per-ABI APKs
+        uses: actions/download-artifact@v4
+        with:
+          path: apks/
+
+      - name: Extract APKs
+        run: |
+          mkdir extracted
+          for apk in apks/*.apk; do
+            folder=$(basename "$apk" .apk)
+            mkdir "extracted/$folder"
+            apktool d -f "$apk" -o "extracted/$folder"
+          done
+
+      - name: Merge APKs
+        run: |
+          # Copy one APK as base
+          cp -r extracted/armeabi-v7a merged
+          # Overwrite lib folders for other ABIs
+          for abi in arm64-v8a x86 x86_64; do
+            cp -r extracted/$abi/lib/* merged/lib/
+          done
+          apktool b merged -o merged/SmartLift-universal.apk
+
+      - name: Align Universal APK
+        run: |
+          zipalign -v 4 merged/SmartLift-universal.apk merged/SmartLift-universal-aligned.apk
+
+      - name: Upload Universal APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: APK-universal
+          path: merged/SmartLift-universal-aligned.apk
