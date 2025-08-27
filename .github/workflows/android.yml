@@ -1,4 +1,4 @@
-name: Build SmartLift APKs
+name: Build Android APKs
 
 on:
   push:
@@ -8,28 +8,32 @@ on:
 
 jobs:
   build:
+    name: Build APKs
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        abi: [arm64-v8a, armeabi-v7a, x86, x86_64]
+        abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
+          python-version: 3.12
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install buildozer==1.4.3 python-for-android==2025.8.2 kivy
+          pip install buildozer python-for-android
 
-      - name: Update buildozer.spec for ABI
+      - name: Patch libffi
+        run: python .github/scripts/patch_libffi.py
+
+      - name: Update buildozer.arch
         run: |
-          sed -i "s/^#* *android.arch =.*/android.arch = ${{ matrix.abi }}/" buildozer.spec
+          sed -i "s/^#* *android.arch =.*/android.arch = ${matrix.abi}/" buildozer.spec
 
       - name: Build APK
         run: buildozer android debug
@@ -37,33 +41,5 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SmartLift-${{ matrix.abi }}
-          path: bin/*.apk
-
-  universal_apk:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install buildozer==1.4.3 python-for-android==2025.8.2 kivy
-
-      - name: Build universal APK
-        run: |
-          sed -i "s/^#* *android.multiple_apks =.*/android.multiple_apks = False/" buildozer.spec
-          buildozer android debug
-
-      - name: Upload universal APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: SmartLift-universal
+          name: APK-${{ matrix.abi }}
           path: bin/*.apk
