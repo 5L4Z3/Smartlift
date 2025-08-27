@@ -13,8 +13,13 @@ orientation = portrait
 android.api = 33
 android.ndk = 25b
 android.minapi = 21
-android.archs = arm64-v8a  # Default; overridden by workflow
+android.archs = arm64-v8a  # Default; workflow will override
 android.multiple_apks = True
+
+# Keystore (uncomment workflow will handle these automatically)
+# android.keystore = release.keystore
+# android.keyalias = my_key_alias
+# android.keyalias_password = my_password
 
 # Permissions
 android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
