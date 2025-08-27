@@ -1,27 +1,45 @@
 [app]
 title = SmartLift
 package.name = smartlift
-package.domain = com.yourdomain
+package.domain = org.example
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas
+source.include_exts = py,kv,png,jpg,jpeg,mp3,txt,atlas
 version = 1.0.0
-requirements = python3,kivy,python-for-android
+# Your app's main module:
 entrypoint = main.py
+requirements = python3,kivy==2.2.1,pillow,sdl2
 orientation = portrait
+fullscreen = 0
+log_level = 2
 
-# Android settings
+# Images (make sure files exist in repo root or adjust paths)
+presplash.filename = Preplash.png
+icon.filename = Icon.png
+
+# Runtime permissions you actually use
+android.permissions = INTERNET, WAKE_LOCK
+
+# API levels
 android.api = 33
-android.ndk = 25b
 android.minapi = 21
-android.archs = armeabi-v7a, arm64-v8a, x86, x86_64
-android.multiple_apks = True
 
-# Keystore (release signing)
-android.keystore = release.keystore
-android.keyalias = smartlift
-android.keyalias_password = 123456
-android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
+# NDK left unspecified: p4a picks a working one automatically
+# android.ndk = 27c
 
-# Assets
-presplash.filename = %(source.dir)s/images/presplash.png
-icon.filename = %(source.dir)s/images/icon.png
+# Build architectures (overridden by GitHub Actions)
+android.archs = arm64-v8a
+# Legacy single-arch token kept for compatibility; set by workflow too
+android.arch = arm64-v8a
+
+# Keep the default bootstrap
+android.bootstrap = sdl2
+
+# Reduce noise in logs
+warn_on_root = 0
+
+# Optional: include only if you have a whitelist file
+# android.whitelist = whitelist.txt
+
+[buildozer]
+log_level = 2
+warn_on_root = 0
