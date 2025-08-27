@@ -1,16 +1,14 @@
-#!/usr/bin/env python3
 import os
 
-p4a_dir = os.path.expanduser("~/.buildozer/android/platform/python-for-android")
-libffi_dir = os.path.join(p4a_dir, "pythonforandroid/recipes/libffi")
-
-if not os.path.isdir(libffi_dir):
-    print("libffi directory not found, skipping patch.")
+libffi_path = "./.buildozer/android/platform/build/other_builds/libffi"
+if os.path.exists(libffi_path):
+    for root, dirs, files in os.walk(libffi_path):
+        for file in files:
+            filepath = os.path.join(root, file)
+            with open(filepath, "r") as f:
+                lines = f.readlines()
+            with open(filepath, "w") as f:
+                for line in lines:
+                    f.write(line.replace("AM_CONFIG_HEADER", "AC_CONFIG_HEADERS"))
 else:
-    patched_file = os.path.join(libffi_dir, "build.py")
-    with open(patched_file, "r") as f:
-        lines = f.readlines()
-    with open(patched_file, "w") as f:
-        for line in lines:
-            f.write(line.replace("AM_CONFIG_HEADER", "AC_CONFIG_HEADERS"))
-    print("libffi patch applied successfully.")
+    print("libffi directory not found, skipping patch.")
