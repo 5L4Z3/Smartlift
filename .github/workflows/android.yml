@@ -39,9 +39,7 @@ jobs:
 
       - name: Build APK (${{ matrix.abi }})
         run: |
-          buildozer android release \
-            --config buildozer.spec \
-            --arch ${{ matrix.abi }}
+          buildozer android release --arch ${{ matrix.abi }}
 
       - name: Upload ABI APK artifact
         uses: actions/upload-artifact@v3
