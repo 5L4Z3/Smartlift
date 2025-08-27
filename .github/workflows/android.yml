@@ -82,18 +82,29 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install buildozer==1.4.2 python-for-android==2025.8.2 cython
+          sudo apt-get install -y zipalign
 
       - name: Decode keystore
         run: echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release.keystore
 
-      - name: Set buildozer to universal
-        run: sed -i "s/^android.archs =.*/android.archs = armeabi-v7a,arm64-v8a,x86,x86_64/" buildozer.spec
+      - name: Merge per-ABI APKs into universal
+        run: |
+          mkdir universal_apk
+          cp SmartLift-armeabi-v7a/bin/*.apk universal_apk/
+          cp SmartLift-arm64-v8a/bin/*.apk universal_apk/
+          cp SmartLift-x86/bin/*.apk universal_apk/
+          cp SmartLift-x86_64/bin/*.apk universal_apk/
+          python3 .github/scripts/merge_apks.py --output universal.apk universal_apk/*.apk
 
-      - name: Build universal APK
-        run: buildozer android debug
+      - name: Sign universal APK
+        run: jarsigner -keystore release.keystore -storepass $ANDROID_KEY_PASSWORD \
+          -keypass $ANDROID_KEY_PASSWORD universal.apk $ANDROID_KEY_ALIAS
+
+      - name: Align universal APK
+        run: zipalign -v 4 universal.apk SmartLift-universal.apk
 
       - name: Upload universal APK
         uses: actions/upload-artifact@v4
         with:
           name: SmartLift-universal
-          path: bin/*.apk
+          path: SmartLift-universal.apk
