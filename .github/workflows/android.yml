@@ -31,11 +31,19 @@ jobs:
       - name: Run libffi patch
         run: python .github/scripts/patch_libffi.py || echo "libffi patch skipped"
 
-      - name: Update buildozer.arch
+      - name: Configure Buildozer for ABI
         run: sed -i "s/^android.archs =.*/android.archs = ${matrix.abi}/" buildozer.spec || echo "android.archs not found"
 
+      - name: Configure signing via GH Secrets
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          echo $ANDROID_KEYSTORE_BASE64 | base64 --decode > release.keystore
+          sed -i "s|# android.keystore =.*|android.keystore = release.keystore|" buildozer.spec
+          sed -i "s|# android.keyalias =.*|android.keyalias = ${ANDROID_KEY_ALIAS}|" buildozer.spec
+          sed -i "s|# android.keyalias_password =.*|android.keyalias_password = ${ANDROID_KEY_PASSWORD}|" buildozer.spec
+
       - name: Build APK
-        run: buildozer android debug
+        run: buildozer android release
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -61,10 +69,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install cython kivy buildozer python-for-android
 
-      - name: Build Universal APK
+      - name: Configure Buildozer for universal APK
+        run: sed -i "s/^android.archs =.*/android.archs = armeabi-v7a,arm64-v8a,x86,x86_64/" buildozer.spec || echo "android.archs not found"
+
+      - name: Configure signing via GH Secrets
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
         run: |
-          sed -i "s/^android.archs =.*/android.archs = armeabi-v7a,arm64-v8a,x86,x86_64/" buildozer.spec || echo "android.archs not found"
-          buildozer android debug
+          echo $ANDROID_KEYSTORE_BASE64 | base64 --decode > release.keystore
+          sed -i "s|# android.keystore =.*|android.keystore = release.keystore|" buildozer.spec
+          sed -i "s|# android.keyalias =.*|android.keyalias = ${ANDROID_KEY_ALIAS}|" buildozer.spec
+          sed -i "s|# android.keyalias_password =.*|android.keyalias_password = ${ANDROID_KEY_PASSWORD}|" buildozer.spec
+
+      - name: Build Universal APK
+        run: buildozer android release
 
       - name: Upload Universal APK
         uses: actions/upload-artifact@v4
