@@ -1,20 +1,47 @@
-# python-for-android
-.p4a/
-.p4a_env/
-
-# Buildozer
-.buildozer/
-
-# Android SDK/NDK (CI-only; local paths vary)
-android-sdk/
-
-# Bytecode & OS
+# Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Buildozer files
+.buildozer/
+bin/
+.gradle/
+.keystore
+.local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VS Code
+.vscode/
+
+# OS-specific files
 .DS_Store
 Thumbs.db
 
-# APK outputs
-*.apk
+# Logs
+*.log
+
+# Packaging
+*.spec
 dist/
-bin/
+build/
+
+# Kivy / App assets cache
+*.atlas
+
+# GitHub Actions temp
+.github/workflows/__pycache__/
+.github/scripts/__pycache__/
