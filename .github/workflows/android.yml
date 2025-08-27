@@ -4,19 +4,15 @@ on:
   push:
     branches:
       - main
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
-    name: Build APKs
+    name: Build per-ABI APKs
     runs-on: ubuntu-latest
     strategy:
       matrix:
         abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
-    env:
-      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
     steps:
       - name: Checkout repo
@@ -25,29 +21,26 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.12"
+          python-version: 3.12
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install cython buildozer python-for-android
+          pip install cython kivy buildozer python-for-android
 
       - name: Run libffi patch
-        run: |
-          python .github/scripts/patch_libffi.py || echo "Libffi patch skipped"
+        run: python .github/scripts/patch_libffi.py || echo "libffi patch skipped"
 
-      - name: Adjust buildozer.spec for ABI
-        run: |
-          sed -i "s/^#* *android.arch =.*/android.arch = ${matrix.abi}/" buildozer.spec
+      - name: Update buildozer.arch
+        run: sed -i "s/^android.archs =.*/android.archs = ${matrix.abi}/" buildozer.spec || echo "android.archs not found"
 
       - name: Build APK
-        run: |
-          buildozer android debug
+        run: buildozer android debug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: apk-${{ matrix.abi }}
+          name: smartlift-${{ matrix.abi }}-apk
           path: bin/*.apk
 
   universal:
@@ -61,20 +54,20 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.12"
+          python-version: 3.12
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install cython buildozer python-for-android
+          pip install cython kivy buildozer python-for-android
 
       - name: Build Universal APK
         run: |
-          # Ensure multiple_apks=True in buildozer.spec
-          buildozer android debug deploy run
+          sed -i "s/^android.archs =.*/android.archs = armeabi-v7a,arm64-v8a,x86,x86_64/" buildozer.spec || echo "android.archs not found"
+          buildozer android debug
 
       - name: Upload Universal APK
         uses: actions/upload-artifact@v4
         with:
-          name: apk-universal
+          name: smartlift-universal-apk
           path: bin/*.apk
