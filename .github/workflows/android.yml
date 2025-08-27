@@ -1,176 +1,82 @@
-name: Android APKs (per-ABI + universal)
+name: Build Android APK
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   pull_request:
 
 jobs:
-  build-per-abi:
-    name: Build APK (${{ matrix.abi }})
+  build-apk:
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
         abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Set up Python (3.10 for p4a/Kivy stability)
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-py310-${{ hashFiles('buildozer.spec') }}
-          restore-keys: pip-${{ runner.os }}-py310-
-
-      - name: Cache Buildozer workspace
-        uses: actions/cache@v4
-        with:
-          path: |
-            .buildozer
-            ~/.buildozer
-          key: bzr-${{ runner.os }}-${{ matrix.abi }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: bzr-${{ runner.os }}-${{ matrix.abi }}-
-
-      - name: Install system packages
+      - name: Install dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y \
-            build-essential git zip unzip openjdk-17-jdk \
-            libffi-dev libssl-dev libncurses5 libncurses5-dev libtinfo5 \
-            libsqlite3-dev zlib1g-dev
+          sudo apt-get install -y libncurses6 libtinfo6 libffi-dev libssl-dev \
+            openjdk-17-jdk unzip zip python3 python3-pip git
 
-      - name: Install Python tooling
+      - name: Set up Python environment
         run: |
-          python -m pip install --upgrade pip
-          # p4a will be pulled as a dependency of buildozer, but pinning removes surprises
-          pip install "buildozer==1.5.0" "python-for-android" "Cython==0.29.36"
+          python3 -m pip install --upgrade pip
+          pip install buildozer cython
 
-      - name: Patch libffi (non-fatal if not found)
+      - name: Patch libffi
         run: |
-          python .github/scripts/patch_libffi.py || true
+          chmod +x .github/scripts/patch_libffi.sh
+          .github/scripts/patch_libffi.sh
 
-      - name: Set ABI env
-        run: echo "ABI=${{ matrix.abi }}" >> $GITHUB_ENV
-
-      - name: Update buildozer.spec for single ABI
+      - name: Decode Keystore
         run: |
-          python - << 'PY'
-          import os, re, io
-          path = "buildozer.spec"
-          abi  = os.environ["ABI"]
-          with open(path, "r", encoding="utf-8") as f:
-              s = f.read()
-          # Normalize tokens; prefer plural android.archs but also set legacy android.arch
-          if re.search(r'(?m)^\s*android\.archs\s*=', s):
-              s = re.sub(r'(?m)^\s*android\.archs\s*=.*$', f'android.archs = {abi}', s)
-          else:
-              s += f'\nandroid.archs = {abi}\n'
-          if re.search(r'(?m)^\s*android\.arch\s*=', s):
-              s = re.sub(r'(?m)^\s*android\.arch\s*=.*$', f'android.arch = {abi}', s)
-          else:
-              s += f'android.arch = {abi}\n'
-          with open(path, "w", encoding="utf-8") as f:
-              f.write(s)
-          print("buildozer.spec set to ABI:", abi)
-          PY
+          echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > release.keystore
 
-      - name: Build debug APK (single ABI)
+      - name: Build APK (${{ matrix.abi }})
         run: |
-          buildozer android debug
+          buildozer android release \
+            --config buildozer.spec \
+            --arch ${{ matrix.abi }}
 
-      - name: Upload per-ABI APK
-        uses: actions/upload-artifact@v4
+      - name: Upload ABI APK artifact
+        uses: actions/upload-artifact@v3
         with:
-          name: apk-${{ matrix.abi }}-debug
+          name: apk-${{ matrix.abi }}
           path: bin/*.apk
-          if-no-files-found: error
 
-  build-universal:
-    name: Build universal APK
-    needs: build-per-abi
+  merge-apks:
     runs-on: ubuntu-latest
-
+    needs: build-apk
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Set up Python (3.10)
-        uses: actions/setup-python@v5
+      - name: Download all ABI APKs
+        uses: actions/download-artifact@v3
         with:
-          python-version: "3.10"
+          path: apks
 
-      - name: Cache pip
-        uses: actions/cache@v4
+      - name: Merge into universal APK
+        run: |
+          pip install apktool
+          python3 .github/scripts/merge_apks.py apks bin/universal-release.apk
+
+      - name: Sign universal APK
+        run: |
+          echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > release.keystore
+          echo "${{ secrets.KEY_PROPERTIES }}" > key.properties
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+            -keystore release.keystore -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+            -keypass "${{ secrets.KEY_PASSWORD }}" \
+            bin/universal-release.apk release-key-alias
+
+      - name: Upload final Universal APK
+        uses: actions/upload-artifact@v3
         with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-py310-${{ hashFiles('buildozer.spec') }}
-          restore-keys: pip-${{ runner.os }}-py310-
-
-      - name: Cache Buildozer workspace
-        uses: actions/cache@v4
-        with:
-          path: |
-            .buildozer
-            ~/.buildozer
-          key: bzr-${{ runner.os }}-universal-${{ hashFiles('buildozer.spec') }}
-          restore-keys: bzr-${{ runner.os }}-universal-
-
-      - name: Install system packages
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            build-essential git zip unzip openjdk-17-jdk \
-            libffi-dev libssl-dev libncurses5 libncurses5-dev libtinfo5 \
-            libsqlite3-dev zlib1g-dev
-
-      - name: Install Python tooling
-        run: |
-          python -m pip install --upgrade pip
-          pip install "buildozer==1.5.0" "python-for-android" "Cython==0.29.36"
-
-      - name: Patch libffi (non-fatal if not found)
-        run: |
-          python .github/scripts/patch_libffi.py || true
-
-      - name: Update buildozer.spec for universal APK
-        env:
-          ABI_LIST: "armeabi-v7a, arm64-v8a, x86, x86_64"
-        run: |
-          python - << 'PY'
-          import os, re
-          path = "buildozer.spec"
-          abis = os.environ["ABI_LIST"]
-          with open(path, "r", encoding="utf-8") as f:
-              s = f.read()
-          # Force plural list; keep legacy single token in sync (not strictly required)
-          if re.search(r'(?m)^\s*android\.archs\s*=', s):
-              s = re.sub(r'(?m)^\s*android\.archs\s*=.*$', f'android.archs = {abis}', s)
-          else:
-              s += f'\nandroid.archs = {abis}\n'
-          if re.search(r'(?m)^\s*android\.arch\s*=', s):
-              s = re.sub(r'(?m)^\s*android\.arch\s*=.*$', f'android.arch = arm64-v8a', s)
-          else:
-              s += 'android.arch = arm64-v8a\n'
-          with open(path, "w", encoding="utf-8") as f:
-              f.write(s)
-          print("buildozer.spec set to universal archs:", abis)
-          PY
-
-      - name: Build debug APK (universal)
-        run: |
-          buildozer android debug
-
-      - name: Upload universal APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: apk-universal-debug
-          path: bin/*.apk
-          if-no-files-found: error
+          name: universal-apk
+          path: bin/universal-release.apk
