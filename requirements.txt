@@ -1,3 +1,6 @@
-# Used for the GitHub Actions pip cache key, not by p4a build requirements
-pip>=23.2
-wheel
+Cython==3.0.11
+buildozer==1.5.0
+python-for-android @ git+https://github.com/kivy/python-for-android.git@develop
+kivy==2.2.1
+plyer
+kivy-garden.graph
