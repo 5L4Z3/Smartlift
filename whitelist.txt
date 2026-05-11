@@ -4,3 +4,7 @@
 *.jpeg
 *.mp3
 *.kv
+*.ttf
+*.otf
+*.json
+*.md
