@@ -1,175 +1,134 @@
-name: Android build — SmartLift
-
+name: Android Build — SmartLift
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
 
 env:
-  ANDROID_API: 33
-  NDK_API: 21
-  ANDROID_BUILD_TOOLS: 35.0.0
+  ANDROID_API: 34
+  ANDROID_NDK: 27.2.12479018
   DIST_NAME: smartlift
 
 jobs:
   build-per-abi:
-    name: Build APK (per-ABI)
+    name: Build APK (${{ matrix.abi }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
-
+        abi: [armeabi-v7a, arm64-v8a, x86_64]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Cache Buildozer
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            .buildozer
+          key: ${{ runner.os }}-buildozer-${{ hashFiles('**/buildozer.spec') }}-${{ matrix.abi }}
 
-      - name: Install system packages
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v4
+        with: { python-version: "3.10" }
+
+      - name: Install System Deps
         run: |
-          set -euo pipefail
           sudo apt-get update -y
-          # libncurses6 & libtinfo6 work on Ubuntu 22/24 hosted runners
-          sudo apt-get install -y \
-            openjdk-17-jdk unzip zip git python3 python3-pip \
+          sudo apt-get install -y openjdk-17-jdk python3-pip python3-venv \
             libffi-dev libssl-dev libsqlite3-dev libjpeg-dev zlib1g-dev \
             build-essential libgl1-mesa-dev libncurses6 libtinfo6
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
-
-      - name: Upgrade pip & install build tools
+      - name: Install Python Tools
         run: |
-          python -m pip install --upgrade pip
-          # Use stable buildozer and p4a develop for AAB support; cython required
-          pip install "Cython==0.29.33"
-          pip install buildozer==1.5.0
+          python -m pip install --upgrade pip wheel
+          pip install Cython==3.0.11 buildozer==1.5.0
           pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
 
-      - name: Patch python-for-android libffi recipe (synchronous)
-        # This runs immediately after p4a is installed, before any build steps that use it.
-        run: |
-          python .github/scripts/patch_libffi.py
+      - name: Patch libffi
+        run: python patch_libffi.py
 
-      - name: Make sure buildozer.spec has the right ABI (per-matrix)
+      - name: Configure ABI
         run: |
-          # Replace commented or existing android.archs token with the current ABI
-          sed -i -E "s/^#?\s*android\.archs\s*=.*/android.archs = ${{ matrix.abi }}/" buildozer.spec || true
-          echo "Using android.archs set to: $(grep -i 'android.archs' buildozer.spec || true)"
+          sed -i "s/^android\.archs\s*=.*/android.archs = ${{ matrix.abi }}/" buildozer.spec
 
-      - name: Ensure icons & presplash included (debug)
-        run: |
-          # sanity check: fail early if required assets missing
-          test -f Icon.png || echo "Warning: Icon.png not found" 
-          test -f Preplash.png || echo "Warning: Preplash.png not found"
+      - name: Build Debug APK
+        run: buildozer android debug
 
-      - name: Build (per-ABI) — debug (faster iterative build)
-        run: |
-          # build debug to iterate quickly (switch to release when you're ready)
-          buildozer android debug
-
-      - name: Upload ABI APK artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: apk-${{ matrix.abi }}
           path: bin/*.apk
-          # keep default retention
 
   build-aab:
-    name: Build AAB (recommended for Play)
+    name: Build AAB (Release)
     runs-on: ubuntu-latest
     needs: build-per-abi
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install system packages
-        run: |
-          set -euo pipefail
-          sudo apt-get update -y
-          sudo apt-get install -y openjdk-17-jdk unzip zip python3 python3-pip \
-            libffi-dev libssl-dev libsqlite3-dev libjpeg-dev zlib1g-dev build-essential
-
-      - name: Setup Python
+      - uses: actions/checkout@v4
+      - name: Setup Python 3.10
         uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
+        with: { python-version: "3.10" }
 
-      - name: Install p4a (develop) & deps
+      - name: Install Tools & Patch
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip wheel Cython==3.0.11 buildozer==1.5.0
           pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
-          pip install Cython==0.29.33
+          python patch_libffi.py
 
-      - name: Patch python-for-android libffi recipe (again)
+      - name: Build AAB
         run: |
-          python .github/scripts/patch_libffi.py
-
-      - name: Build AAB (release)
-        env:
-          ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
-        run: |
-          # Create a reproducible .p4a config and build an AAB using p4a directly.
-          # This will produce an .aab in the dist/ or bin/ directory depending on p4a version.
-          # The command below uses the develop branch p4a installed above, which supports bundles.
-          p4a apk \
+          p4a bundle \
             --private . \
-            --package=org.example.smartlift \
+            --package=org.smartlift.app \
             --name="SmartLift" \
-            --version=1.0 \
+            --version=2.0.0 \
             --bootstrap=sdl2 \
-            --requirements=python3,kivy==2.2.1,pillow,sdl2 \
+            --requirements=python3,kivy==2.2.1,plyer,kivy-garden.graph,sdl2 \
             --arch=all \
             --dist-name=${{ env.DIST_NAME }} \
             --release \
-            --color=always \
-            --format=aab || true
-          # p4a --format=aab may not be available on older p4a; the "|| true" avoids hard fail
-          # Inspect filesystem to find the AAB if build succeeded
-          find . -type f -name "*.aab" -maxdepth 6 -print || true
+            --color=always
 
-      - name: Upload AAB if produced
+      - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
-          name: SmartLift-aab
+          name: SmartLift-release-aab
           path: "**/*.aab"
 
-  merge-and-sign:
-    name: Merge APKs (universal placeholder) & Sign
+  sign-and-package:
+    name: Sign & Package
     runs-on: ubuntu-latest
-    needs: [ build-per-abi, build-aab ]
-    if: always()
+    needs: [build-per-abi, build-aab]
+    if: ${{ github.ref == 'refs/heads/main' }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
 
-      - name: Download ABI APK artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: apks
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with: { java-version: "17" }
 
-      - name: Create universal APK (placeholder) & merge
+      - name: Sign APKs
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
         run: |
-          python .github/scripts/merge_apks.py apks bin/universal-release.apk
-          ls -la bin || true
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > release.jks
+          for apk in artifacts/apk-*/smart*.apk; do
+            name=$(basename "$apk" .apk)
+            apksigner sign \
+              --ks release.jks \
+              --ks-pass env:KEYSTORE_PASSWORD \
+              --key-pass env:KEY_PASSWORD \
+              --out "${name}-signed.apk" "$apk"
+          done
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-      - name: Prepare keystore (from GH secret RELEASE_KEYSTORE_BASE64)
-        if: secrets.RELEASE_KEYSTORE_BASE64 != ''
-        run: |
-          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > release.keystore
-          ls -la release.keystore
-
-      - name: Sign universal APK (if keystore present)
-        if: secrets.RELEASE_KEYSTORE_BASE64 != ''
-        run: |
-          jarsigner -keystore release.keystore -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
-            -keypass "${{ secrets.KEY_PASSWORD }}" \
-            -signedjar bin/universal-release-signed.apk bin/universal-release.apk "${{ secrets.KEY_ALIAS }}"
-
-      - name: Upload final artifacts
+      - name: Upload Signed Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: final-artifacts
+          name: final-release-artifacts
           path: |
-            bin/*.apk
-            **/*.aab
+            **/*-signed.apk
+            artifacts/SmartLift-release-aab/*.aab
