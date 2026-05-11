@@ -1,5 +1,18 @@
-import kivy
+"""
+SmartLift Pro v2.0.0
+Production-grade workout planner & logger
+"""
+import logging
+import os
+import json
+import math
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Tuple, Union
+from pathlib import Path
+
+import plyer
 from kivy.app import App
+from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
@@ -13,819 +26,577 @@ from kivy.storage.jsonstore import JsonStore
 from kivy.clock import Clock
 from kivy.core.audio import SoundLoader
 from kivy.metrics import dp
-from kivy.properties import ObjectProperty, StringProperty
-from datetime import datetime
-from plyer import vibration
-import re
-import json
-import os
+from kivy.properties import StringProperty, BooleanProperty, ObjectProperty, NumericProperty
+from kivy.core.window import Window
+from kivy.utils import get_color_from_hex
 
-# Match your build environment
-kivy.require('2.2.1')
+# Configure structured logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("SmartLift")
 
-# =============================================================================
+kivy.require("2.2.1")
+
+# ==============================================================================
+# CONSTANTS & SCHEMA
+# ==============================================================================
+SCHEMA_VERSION = 2
+APP_DIR = Path(__file__).parent
+
+# ==============================================================================
+# DATA LAYER
+# ==============================================================================
+class DataStore:
+    """Handles JSON persistence with schema migration & versioning"""
+    def __init__(self, filepath: str, default_data: Dict):
+        self.path = Path(filepath)
+        self.default_data = default_data
+        self.data = self._load()
+
+    def _load(self) -> Dict:
+        if not self.path.exists():
+            logger.info(f"Initializing new store at {self.path}")
+            self.default_data["_schema_version"] = SCHEMA_VERSION
+            self.save()
+            return self.default_data.copy()
+
+        with open(self.path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # Migration hook
+        version = data.get("_schema_version", 0)
+        if version < SCHEMA_VERSION:
+            logger.info(f"Migrating store from v{version} to v{SCHEMA_VERSION}")
+            data = self._migrate(data, version)
+            data["_schema_version"] = SCHEMA_VERSION
+            self.save()
+        return data
+
+    def _migrate(self, data: Dict, from_version: int) -> Dict:
+        """Add migration logic here for future schema changes"""
+        if from_version < 2:
+            data.setdefault("unit", "kg")
+        return data
+
+    def save(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(self.data, f, indent=2, ensure_ascii=False)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.data.get(key, default)
+
+    def set(self, key: str, value: Any):
+        self.data[key] = value
+        self.save()
+
+# ==============================================================================
 # UTILS & VALIDATION
-# =============================================================================
-
-def safe_numeric_input(text, allow_negative=False, allow_decimal=True, default=0):
-    """Robust numeric parser for weights, reps, etc."""
-    if not text or not text.strip():
+# ==============================================================================
+def parse_numeric(value: str, allow_negative: bool = False, allow_decimal: bool = True, default: float = 0.0) -> float:
+    if not value or not value.strip():
         return default
     try:
-        cleaned = text.strip().replace(',', '.')
-        if allow_decimal:
-            value = float(cleaned)
-        else:
-            value = int(float(cleaned))  # Handle "10.9" → 10 for reps
-        if not allow_negative and value < 0:
-            return default
-        return value
-    except (ValueError, TypeError):
+        cleaned = value.strip().replace(",", ".")
+        num = float(cleaned) if allow_decimal else int(float(cleaned))
+        if not allow_negative and num < 0:
+            raise ValueError("Negative values not allowed")
+        return num
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Numeric parse failed for '{value}': {e}")
         return default
 
-def format_weight(value, unit='kg'):
-    """Display weight with unit suffix"""
+def format_weight(value: float, unit: str = "kg") -> str:
     return f"{value:.1f} {unit}" if value else f"0 {unit}"
 
-# =============================================================================
-# DATA MODELS
-# =============================================================================
+def safe_vibrate(duration: float = 0.5):
+    try:
+        plyer.vibration.vibrate(duration)
+    except Exception as e:
+        logger.debug(f"Vibration unavailable: {e}")
 
-class ExerciseLibrary:
-    """Simple in-memory + JSON exercise library"""
-    def __init__(self, store_path):
-        self.store_path = store_path
-        self.exercises = self._load()
-    
-    def _load(self):
-        if os.path.exists(self.store_path):
-            with open(self.store_path, 'r') as f:
-                return json.load(f)
-        # Default starter library
-        return {
-            "bench_press": {"name": "Bench Press", "muscle": "Chest", "equipment": "Barbell"},
-            "squat": {"name": "Squat", "muscle": "Legs", "equipment": "Barbell"},
-            "deadlift": {"name": "Deadlift", "muscle": "Back", "equipment": "Barbell"},
-            "pull_up": {"name": "Pull Up", "muscle": "Back", "equipment": "Bodyweight"},
-            "shoulder_press": {"name": "Shoulder Press", "muscle": "Shoulders", "equipment": "Dumbbell"},
-        }
-    
-    def save(self):
-        with open(self.store_path, 'w') as f:
-            json.dump(self.exercises, f, indent=2)
-    
-    def add(self, key, name, muscle="", equipment=""):
-        self.exercises[key] = {"name": name, "muscle": muscle, "equipment": equipment}
-        self.save()
-    
-    def search(self, query):
-        """Case-insensitive partial match on name or key"""
-        query = query.lower()
-        results = []
-        for key, ex in self.exercises.items():
-            if query in key.lower() or query in ex['name'].lower():
-                results.append((key, ex))
-        return results
-
-class WorkoutPlan:
-    def __init__(self, name, days, unit='kg'):
-        self.name = name
-        self.days = days  # List of day dicts
-        self.unit = unit  # 'kg' or 'lb'
-    
-    def to_dict(self):
-        return {'name': self.name, 'days': self.days, 'unit': self.unit}
-    
-    @classmethod
-    def from_dict(cls, data):
-        return cls(data['name'], data['days'], data.get('unit', 'kg'))
-
-# =============================================================================
+# ==============================================================================
 # CUSTOM WIDGETS
-# =============================================================================
+# ==============================================================================
+class LongPressBehavior(ButtonBehavior):
+    """Mixin for long-press detection with proper Clock cleanup"""
+    long_press_time = NumericProperty(0.5)
+    on_long_press = ObjectProperty(None)
 
-class LongPressButton(ButtonBehavior, Label):
-    """Label that triggers on long press (for delete gestures)"""
-    long_press_time = 0.5  # seconds
-    
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._trigger = Clock.create_trigger(self._on_long_press, self.long_press_time)
-    
+        self._trigger = Clock.create_trigger(self._dispatch_long_press, self.long_press_time)
+
     def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos):
+        if self.collide_point(*touch.pos) and self.on_long_press:
             touch.grab(self)
             self._trigger()
             return True
         return super().on_touch_down(touch)
-    
+
     def on_touch_up(self, touch):
         if touch.grab_current is self:
             self._trigger.cancel()
             touch.ungrab(self)
         return super().on_touch_up(touch)
-    
-    def _on_long_press(self, dt):
-        # Override in parent
-        pass
 
-# =============================================================================
+    def on_touch_move(self, touch):
+        if touch.grab_current is self and not self.collide_point(*touch.pos):
+            self._trigger.cancel()
+            touch.ungrab(self)
+        return super().on_touch_move(touch)
+
+    def _dispatch_long_press(self, dt):
+        if self.on_long_press:
+            self.on_long_press(self)
+
+    def on_long_press_time(self, instance, value):
+        self._trigger.cancel()
+        self._trigger = Clock.create_trigger(self._dispatch_long_press, value)
+
+class LongPressButton(LongPressBehavior, Label):
+    pass
+
+# ==============================================================================
+# SCREENS
+# ==============================================================================
+class PlanningScreen(Screen):
+    def __init__(self, app_ref, **kwargs):
+        super().__init__(**kwargs)
+        self.app_ref = app_ref
+        self.build_ui()
+
+    def build_ui(self):
+        self.layout = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(10))
+        self.scroll = ScrollView(size_hint=(1, 1))
+        self.content = BoxLayout(orientation="vertical", spacing=dp(10), size_hint_y=None, padding=dp(5))
+        self.content.bind(minimum_height=self.content.setter("height"))
+        self.scroll.add_widget(self.content)
+        self.layout.add_widget(self.scroll)
+
+        btn_add = Button(text="➕ Add Day", size_hint_y=None, height=dp(50), background_color=(0.2, 0.8, 0.2, 1))
+        btn_add.bind(on_press=lambda _: self.app_ref.add_day())
+        self.layout.add_widget(btn_add)
+        self.add_widget(self.layout)
+        self._render_days()
+
+    def _render_days(self):
+        self.content.clear_widgets()
+        for i, day in enumerate(self.app_ref.plan_data.get("days", [])):
+            card = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(100))
+            with card.canvas.before:
+                Color(rgba=(0.95, 0.95, 0.95, 1))
+                self.rect = Rectangle(pos=card.pos, size=card.size)
+                card.bind(pos=self._update_rect, size=self._update_rect)
+
+            header = BoxLayout(size_hint_y=None, height=dp(40))
+            title = LongPressButton(
+                text=f"🗓️ {day.get('name', f'Day {i+1}')}",
+                font_size=dp(16),
+                color=(0, 0, 0, 1),
+                on_long_press=lambda btn, idx=i: self.app_ref.confirm_delete_day(idx)
+            )
+            header.add_widget(title)
+            header.add_widget(Label(text=f"({len(day.get('exercises', []))} exercises)", size_hint_x=None, width=dp(100), color=(0.5, 0.5, 0.5, 1)))
+            edit_btn = Button(text="✏️ Edit", size_hint_x=None, width=dp(70))
+            edit_btn.bind(on_press=lambda _, idx=i: self.app_ref.open_day_editor(idx))
+            header.add_widget(edit_btn)
+            card.add_widget(header)
+            self.content.add_widget(card)
+
+    def _update_rect(self, instance, value):
+        self.rect.pos = instance.pos
+        self.rect.size = instance.size
+
+class WorkoutScreen(Screen):
+    def __init__(self, app_ref, **kwargs):
+        super().__init__(**kwargs)
+        self.app_ref = app_ref
+        self.build_ui()
+
+    def build_ui(self):
+        self.scroll = ScrollView(size_hint=(1, 1))
+        self.content = BoxLayout(orientation="vertical", spacing=dp(10), size_hint_y=None, padding=dp(10))
+        self.content.bind(minimum_height=self.content.setter("height"))
+        self.scroll.add_widget(self.content)
+        self.add_widget(self.scroll)
+        self._render_days()
+
+    def _render_days(self):
+        self.content.clear_widgets()
+        for day in self.app_ref.plan_data.get("days", []):
+            if day.get("rest", False):
+                continue
+            card = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(60))
+            with card.canvas.before:
+                Color(rgba=(0.9, 0.95, 1, 1))
+                self.rect = Rectangle(pos=card.pos, size=card.size)
+                card.bind(pos=self._update_rect, size=self._update_rect)
+
+            label = Label(text=f"🏋️ {day['name']}", font_size=dp(18), bold=True)
+            btn = Button(text="▶️ Start", size_hint_x=None, width=dp(100))
+            btn.bind(on_press=lambda _, d=day: self.app_ref.open_workout_logger(d))
+            card.add_widget(label)
+            card.add_widget(btn)
+            self.content.add_widget(card)
+
+    def _update_rect(self, instance, value):
+        self.rect.pos = instance.pos
+        self.rect.size = instance.size
+
+class SettingsScreen(Screen):
+    def __init__(self, app_ref, **kwargs):
+        super().__init__(**kwargs)
+        self.app_ref = app_ref
+        layout = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(15))
+
+        layout.add_widget(Label(text="⚙️ Settings", font_size=dp(24), size_hint_y=None, height=dp(40)))
+
+        unit_row = BoxLayout(size_hint_y=None, height=dp(40))
+        unit_row.add_widget(Label(text="Weight Unit:", size_hint_x=None, width=dp(150)))
+        self.switch_unit = Switch(active=self.app_ref.unit == "lb")
+        self.switch_unit.bind(active=self.app_ref.toggle_unit)
+        unit_row.add_widget(self.switch_unit)
+        layout.add_widget(unit_row)
+
+        btn_export = Button(text="💾 Export Data", size_hint_y=None, height=dp(50))
+        btn_export.bind(on_press=lambda _: self.app_ref.export_data())
+        layout.add_widget(btn_export)
+
+        btn_charts = Button(text="📈 View Progress", size_hint_y=None, height=dp(50))
+        btn_charts.bind(on_press=lambda _: self.app_ref.open_charts())
+        layout.add_widget(btn_charts)
+
+        btn_lib = Button(text="📚 Exercise Library", size_hint_y=None, height=dp(50))
+        btn_lib.bind(on_press=lambda _: self.app_ref.open_library())
+        layout.add_widget(btn_lib)
+
+        self.add_widget(ScrollView(size_hint=(1, 1), content=layout))
+
+# ==============================================================================
 # MAIN APP
-# =============================================================================
-
+# ==============================================================================
 class SmartLiftApp(App):
-    title = "SmartLift Pro"
-    
+    title = APP_TITLE
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.store: Optional[DataStore] = None
+        self.plan_data: Dict = {}
+        self.unit: str = "kg"
+        self.workout_mode: bool = False
+        self.sm: Optional[ScreenManager] = None
+        self.bell_sound = None
+
     def build(self):
-        self.current_plan = None
-        self.current_plan_key = "active_plan"
-        self.workout_mode = False  # Planning vs Logging mode
-        self.unit = 'kg'  # Default unit
-        self.exercise_lib = None
-        self.root = BoxLayout(orientation='vertical')
-        self.root.padding = [dp(10), dp(10), dp(10), dp(10)]
-        return self.root
-    
+        self.sm = ScreenManager()
+        self.sm.transition = SlideTransition()
+        return self.sm
+
     def on_start(self):
-        self.init_data()
-        self.refresh_ui()
-    
-    def init_data(self):
+        self._init_storage()
+        self._init_audio()
+        self._setup_navigation()
+
+    def _init_storage(self):
         data_dir = self.user_data_dir
         os.makedirs(data_dir, exist_ok=True)
-        
-        # Initialize stores
-        self.store = JsonStore(f'{data_dir}/workout_plans.json')
-        lib_path = f'{data_dir}/exercise_library.json'
-        self.exercise_lib = ExerciseLibrary(lib_path)
-        
-        # Load or create default plan
-        if not self.store.exists(self.current_plan_key):
-            default_plan = WorkoutPlan(
-                name="Starter Plan",
-                days=[
-                    {"name": "Push Day", "rest": False, "exercises": []},
-                    {"name": "Pull Day", "rest": False, "exercises": []},
-                    {"name": "Rest", "rest": True, "exercises": []}
-                ],
-                unit='kg'
-            )
-            self.store.put(self.current_plan_key, **default_plan.to_dict())
-        
-        plan_data = self.store.get(self.current_plan_key)
-        self.current_plan = WorkoutPlan.from_dict(plan_data)
-        self.unit = self.current_plan.unit
-        
-        # Load sound with fallback
+        default_plan = {
+            "name": "Starter Plan",
+            "days": [
+                {"name": "Push Day", "rest": False, "exercises": []},
+                {"name": "Pull Day", "rest": False, "exercises": []},
+                {"name": "Rest Day", "rest": True, "exercises": []}
+            ],
+            "unit": "kg"
+        }
+        self.store = DataStore(os.path.join(data_dir, "smartlift_v2.json"), default_plan)
+        self.plan_data = self.store.data
+        self.unit = self.plan_data.get("unit", "kg")
+        logger.info("Storage initialized")
+
+    def _init_audio(self):
         try:
-            self.bell_sound = SoundLoader.load('bell_sound.mp3')
-        except:
-            self.bell_sound = None
-    
-    def save_plan(self):
-        self.current_plan.unit = self.unit
-        self.store.put(self.current_plan_key, **self.current_plan.to_dict())
-    
-    def refresh_ui(self):
-        self.root.clear_widgets()
-        
-        # Header with mode toggle + settings
-        header = BoxLayout(size_hint_y=None, height=dp(60), spacing=dp(10))
-        
-        # Mode toggle
-        mode_label = Label(text="📝 Planning" if not self.workout_mode else "🏋️ Workout Mode", 
-                          size_hint_x=None, width=dp(150))
-        mode_switch = Switch(active=self.workout_mode, size_hint_x=None, width=dp(100))
-        mode_switch.bind(active=self.toggle_workout_mode)
-        
-        # Unit toggle
-        unit_label = Label(text=f"Unit: {self.unit.upper()}", size_hint_x=None, width=dp(100))
-        unit_switch = Switch(active=(self.unit == 'lb'), size_hint_x=None, width=dp(80))
-        unit_switch.bind(active=self.toggle_unit)
-        
-        # Settings button
-        settings_btn = Button(text="⚙️", size_hint_x=None, width=dp(50))
-        settings_btn.bind(on_press=self.open_settings)
-        
-        header.add_widget(mode_label)
-        header.add_widget(mode_switch)
-        header.add_widget(unit_label)
-        header.add_widget(unit_switch)
-        header.add_widget(settings_btn)
-        self.root.add_widget(header)
-        
-        # Main content
+            self.bell_sound = SoundLoader.load("bell_sound.mp3")
+        except Exception as e:
+            logger.warning(f"Audio init failed: {e}")
+
+    def _setup_navigation(self):
+        self.planning_screen = PlanningScreen(self)
+        self.workout_screen = WorkoutScreen(self)
+        self.settings_screen = SettingsScreen(self)
+
+        self.sm.add_widget(self.planning_screen)
+        self.sm.add_widget(self.workout_screen)
+        self.sm.add_widget(self.settings_screen)
+
+        # Header bar
+        self.header = BoxLayout(size_hint_y=None, height=dp(50), padding=dp(5), spacing=dp(10))
+        self.btn_mode = Button(text="📝 Plan", size_hint_x=0.5)
+        self.btn_mode.bind(on_press=self._toggle_mode)
+        self.btn_settings = Button(text="⚙️", size_hint_x=0.2)
+        self.btn_settings.bind(on_press=lambda _: self.sm.current = "settings")
+        self.header.add_widget(self.btn_mode)
+        self.header.add_widget(self.btn_settings)
+
+        # Wrap screens in container
+        container = BoxLayout(orientation="vertical")
+        container.add_widget(self.header)
+        container.add_widget(self.sm)
+        Window.add_widget(container)
+        self._container = container
+
+    def _toggle_mode(self, *_):
+        self.workout_mode = not self.workout_mode
+        self.btn_mode.text = "🏋️ Workout" if self.workout_mode else "📝 Plan"
+        self.sm.current = "workout" if self.workout_mode else "planning"
+        # Refresh screens on entry
         if self.workout_mode:
-            self.build_workout_screen()
+            self.workout_screen._render_days()
         else:
-            self.build_planning_screen()
-    
-    def toggle_workout_mode(self, instance, value):
-        self.workout_mode = value
-        self.refresh_ui()
-    
+            self.planning_screen._render_days()
+
     def toggle_unit(self, instance, value):
-        self.unit = 'lb' if value else 'kg'
-        self.save_plan()
-        self.refresh_ui()  # Refresh to update displayed weights
-    
-    def open_settings(self, instance):
-        content = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(10))
-        content.add_widget(Label(text="⚙️ Settings", font_size='20sp', size_hint_y=None, height=dp(40)))
-        
-        # Exercise library manager
-        lib_btn = Button(text="📚 Manage Exercise Library", size_hint_y=None, height=dp(50))
-        lib_btn.bind(on_press=self.open_exercise_library)
-        content.add_widget(lib_btn)
-        
-        # Export data
-        export_btn = Button(text="💾 Export Plan", size_hint_y=None, height=dp(50))
-        export_btn.bind(on_press=self.export_plan)
-        content.add_widget(export_btn)
-        
-        # Progress charts
-        chart_btn = Button(text="📈 View Progress", size_hint_y=None, height=dp(50))
-        chart_btn.bind(on_press=self.show_progress_charts)
-        content.add_widget(chart_btn)
-        
-        popup = Popup(title="Settings", content=ScrollView(size_hint=(1, None), size=(400, 300)), 
-                     size_hint=(0.9, 0.8))
-        popup.content.add_widget(content)
-        popup.open()
-    
-    # =============================================================================
-    # PLANNING MODE UI
-    # =============================================================================
-    
-    def build_planning_screen(self):
-        scroll = ScrollView(size_hint=(1, 1))
-        layout = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(5), size_hint_y=None)
-        layout.bind(minimum_height=layout.setter('height'))
-        
-        for idx, day in enumerate(self.current_plan.days):
-            day_card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(120), 
-                                canvas.before=[
-                                    kivy.graphics.Color(rgba=(0.95, 0.95, 0.95, 1)),
-                                    kivy.graphics.Rectangle(pos=self.root.pos, size=self.root.size)
-                                ])
-            
-            # Day header with delete gesture
-            header = BoxLayout(size_hint_y=None, height=dp(40))
-            day_title = LongPressButton(
-                text=f"🗓️ {day.get('name', f'Day {idx+1}')}",
-                font_size='18sp',
-                color=(0, 0, 0, 1)
-            )
-            # Override long press to delete day
-            def make_delete_day(i):
-                def _delete(*args):
-                    self.delete_day(i)
-                return _delete
-            day_title._on_long_press = make_delete_day(idx)
-            
-            edit_btn = Button(text="✏️ Edit", size_hint_x=None, width=dp(80))
-            edit_btn.bind(on_press=lambda _, i=idx: self.edit_day(i))
-            
-            header.add_widget(day_title)
-            header.add_widget(edit_btn)
-            day_card.add_widget(header)
-            
-            # Exercise preview
-            ex_count = len(day.get('exercises', []))
-            ex_label = Label(text=f"{ex_count} exercises • Tap to plan", 
-                           size_hint_y=None, height=dp(30), color=(0.3, 0.3, 0.3, 1))
-            day_card.add_widget(ex_label)
-            
-            layout.add_widget(day_card)
-        
-        # Add day button
-        add_day_btn = Button(text="+ Add Training Day", size_hint_y=None, height=dp(50),
-                           background_color=(0.2, 0.8, 0.2, 1))
-        add_day_btn.bind(on_press=self.add_new_day)
-        layout.add_widget(add_day_btn)
-        
-        scroll.add_widget(layout)
-        self.root.add_widget(scroll)
-    
-    def delete_day(self, index):
-        # Confirmation popup
-        content = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(20))
-        content.add_widget(Label(text=f"Delete '{self.current_plan.days[index].get('name')}'?", 
-                               size_hint_y=None, height=dp(40)))
-        
-        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
-        cancel_btn = Button(text="Cancel")
-        delete_btn = Button(text="Delete", background_color=(1, 0.3, 0.3, 1))
-        
-        def confirm_delete(*args):
-            self.current_plan.days.pop(index)
-            self.save_plan()
-            self.refresh_ui()
-            popup.dismiss()
-        
-        cancel_btn.bind(on_press=lambda *a: popup.dismiss())
-        delete_btn.bind(on_press=confirm_delete)
-        
-        btn_row.add_widget(cancel_btn)
-        btn_row.add_widget(delete_btn)
-        content.add_widget(btn_row)
-        
-        popup = Popup(title="Confirm Delete", content=content, size_hint=(0.8, 0.4))
-        popup.open()
-    
-    def add_new_day(self, instance):
-        self.current_plan.days.append({
-            "name": f"New Day {len(self.current_plan.days) + 1}",
-            "rest": False,
-            "exercises": []
+        self.unit = "lb" if value else "kg"
+        self.store.set("unit", self.unit)
+        logger.info(f"Unit changed to {self.unit}")
+
+    def save_plan(self):
+        self.store.set("days", self.plan_data.get("days", []))
+        self.store.set("unit", self.unit)
+
+    def add_day(self):
+        idx = len(self.plan_data.get("days", [])) + 1
+        self.plan_data.setdefault("days", []).append({
+            "name": f"Day {idx}", "rest": False, "exercises": []
         })
         self.save_plan()
-        self.refresh_ui()
-    
-    def edit_day(self, index):
-        day = self.current_plan.days[index]
-        content = ScrollView(size_hint=(1, None), size=(400, 500))
-        layout = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(15), size_hint_y=None)
-        layout.bind(minimum_height=layout.setter('height'))
-        
-        # Day name editor
-        layout.add_widget(Label(text="Day Name:", size_hint_y=None, height=dp(30)))
-        name_input = TextInput(text=day['name'], multiline=False, size_hint_y=None, height=dp(40))
-        name_input.bind(text=lambda inst, val: self._update_day_name(index, val))
-        layout.add_widget(name_input)
-        
-        # Rest day toggle
-        rest_row = BoxLayout(size_hint_y=None, height=dp(40))
-        rest_row.add_widget(Label(text="Rest Day:", size_hint_x=None, width=dp(100)))
-        rest_switch = Switch(active=day.get('rest', False))
-        rest_switch.bind(active=lambda inst, val: self._update_day_rest(index, val))
-        rest_row.add_widget(rest_switch)
-        layout.add_widget(rest_row)
-        
-        # Exercises list
-        layout.add_widget(Label(text="\nExercises:", size_hint_y=None, height=dp(40), font_size='16sp'))
-        
-        for ex_idx, exercise in enumerate(day.get('exercises', [])):
-            ex_card = self._build_exercise_editor(index, ex_idx, exercise)
-            layout.add_widget(ex_card)
-        
-        # Add exercise button with library dropdown
-        add_ex_row = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
-        
-        # Dropdown for exercise library
-        dropdown = DropDown()
-        for key, ex_data in list(self.exercise_lib.exercises.items())[:10]:  # Show top 10
-            btn = Button(text=ex_data['name'], size_hint_y=None, height=dp(40))
-            btn.bind(on_release=lambda btn, k=key: self._add_exercise_from_lib(index, k))
-            dropdown.add_widget(btn)
-        
-        lib_btn = Button(text="📚 From Library", size_hint_x=None, width=dp(150))
-        lib_btn.bind(on_release=dropdown.open)
-        dropdown.bind(on_select=lambda instance, x: setattr(lib_btn, 'text', x))
-        
-        add_custom_btn = Button(text="+ Custom Exercise")
-        add_custom_btn.bind(on_press=lambda _: self._add_custom_exercise(index))
-        
-        add_ex_row.add_widget(lib_btn)
-        add_ex_row.add_widget(add_custom_btn)
-        layout.add_widget(add_ex_row)
-        
-        content.add_widget(layout)
-        popup = Popup(title=f"Edit: {day['name']}", content=content, size_hint=(0.95, 0.9))
+        self.planning_screen._render_days()
+
+    def confirm_delete_day(self, idx: int):
+        day_name = self.plan_data["days"][idx].get("name", "this day")
+        popup = Popup(title="Delete Day?", size_hint=(0.8, 0.4))
+        content = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(15))
+        content.add_widget(Label(text=f"Delete '{day_name}'? This cannot be undone."))
+        btns = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
+        cancel = Button(text="Cancel")
+        delete = Button(text="Delete", background_color=(1, 0.3, 0.3, 1))
+
+        cancel.bind(on_press=popup.dismiss)
+        delete.bind(on_press=lambda _: self._delete_day(idx, popup))
+        btns.add_widget(cancel)
+        btns.add_widget(delete)
+        content.add_widget(btns)
+        popup.content = content
         popup.open()
-    
-    def _update_day_name(self, day_idx, new_name):
-        self.current_plan.days[day_idx]['name'] = new_name
+
+    def _delete_day(self, idx: int, popup):
+        self.plan_data["days"].pop(idx)
         self.save_plan()
-    
-    def _update_day_rest(self, day_idx, is_rest):
-        self.current_plan.days[day_idx]['rest'] = is_rest
-        self.save_plan()
-    
-    def _build_exercise_editor(self, day_idx, ex_idx, exercise):
-        card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(220), 
-                        canvas.before=[
-                            kivy.graphics.Color(rgba=(0.98, 0.98, 0.98, 1)),
-                            kivy.graphics.Rectangle(pos=self.root.pos, size=self.root.size)
-                        ])
-        
-        # Header with delete gesture
-        header = BoxLayout(size_hint_y=None, height=dp(40))
-        ex_name_label = LongPressButton(
-            text=f"💪 {exercise.get('name', 'New Exercise')}",
-            color=(0, 0, 0, 1),
-            font_size='16sp'
-        )
-        # Long press to delete exercise
-        def make_delete_ex(d_idx, e_idx):
-            def _delete(*args):
-                self.delete_exercise(d_idx, e_idx)
-            return _delete
-        ex_name_label._on_long_press = make_delete_ex(day_idx, ex_idx)
-        
-        delete_hint = Label(text="(hold to delete)", size_hint_x=None, width=dp(120), 
-                          color=(0.6, 0.6, 0.6, 1), font_size='12sp')
-        header.add_widget(ex_name_label)
-        header.add_widget(delete_hint)
-        card.add_widget(header)
-        
-        # Last used stats
-        history = exercise.get('history', [])
-        if history:
-            last = history[-1]
-            last_text = f"Last: {last['sets']}x{last['reps']} @ {format_weight(last['weight'], self.unit)}"
-        else:
-            last_text = "No history yet"
-        card.add_widget(Label(text=last_text, size_hint_y=None, height=dp(25), color=(0.4, 0.4, 0.4, 1)))
-        
-        # Input fields
-        inputs = BoxLayout(size_hint_y=None, height=dp(120), spacing=dp(5))
-        
-        # Name (read-only in planner, editable in workout mode)
-        name_input = TextInput(text=exercise['name'], multiline=False, readonly=True,
-                             size_hint_x=0.4, height=dp(40))
-        
-        # Numeric inputs with validation
-        def make_numeric_binder(key, default, allow_decimal=True):
-            def _save(inst):
-                val = safe_numeric_input(inst.text, allow_negative=False, 
-                                       allow_decimal=allow_decimal, default=default)
-                exercise[key] = val
-                self.save_plan()
-            return _save
-        
-        sets_input = TextInput(text=str(exercise.get('sets', 3)), hint_text="Sets", 
-                             input_filter='int', size_hint_x=0.15, height=dp(40))
-        sets_input.bind(on_text_validate=make_numeric_binder('sets', 3, allow_decimal=False))
-        
-        reps_input = TextInput(text=str(exercise.get('reps', 10)), hint_text="Reps", 
-                             input_filter='int', size_hint_x=0.15, height=dp(40))
-        reps_input.bind(on_text_validate=make_numeric_binder('reps', 10, allow_decimal=False))
-        
-        weight_input = TextInput(text=str(exercise.get('weight', 0)), 
-                               hint_text=f"Weight ({self.unit})", 
-                               input_filter='float' if self.unit == 'kg' else 'float', 
-                               size_hint_x=0.2, height=dp(40))
-        weight_input.bind(on_text_validate=make_numeric_binder('weight', 0, allow_decimal=True))
-        
-        rest_input = TextInput(text=str(exercise.get('rest_time', 60)), hint_text="Rest (s)", 
-                             input_filter='int', size_hint_x=0.1, height=dp(40))
-        rest_input.bind(on_text_validate=make_numeric_binder('rest_time', 60, allow_decimal=False))
-        
-        inputs.add_widget(name_input)
-        inputs.add_widget(sets_input)
-        inputs.add_widget(reps_input)
-        inputs.add_widget(weight_input)
-        inputs.add_widget(rest_input)
-        card.add_widget(inputs)
-        
-        # Action buttons
-        actions = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
-        
-        rest_btn = Button(text="⏱️ Rest", size_hint_x=0.5)
-        rest_btn.bind(on_press=lambda _: self.start_rest_timer(exercise.get('rest_time', 60)))
-        actions.add_widget(rest_btn)
-        
-        # Only show log button in workout mode
-        if self.workout_mode:
-            log_btn = Button(text="✓ Log Set", background_color=(0.2, 0.8, 0.2, 1), size_hint_x=0.5)
-            log_btn.bind(on_press=lambda _: self.log_actual_set(day_idx, ex_idx))
-            actions.add_widget(log_btn)
-        
-        card.add_widget(actions)
-        return card
-    
-    def _add_exercise_from_lib(self, day_idx, exercise_key):
-        ex_data = self.exercise_lib.exercises.get(exercise_key)
-        if not ex_data:
-            return
-        new_ex = {
-            "name": ex_data['name'],
-            "sets": 3,
-            "reps": 10,
-            "weight": 0,
-            "rest_time": 60,
-            "history": [],
-            "library_key": exercise_key  # Reference for later updates
-        }
-        self.current_plan.days[day_idx].setdefault('exercises', []).append(new_ex)
-        self.save_plan()
-        self.refresh_ui()  # Refresh to show updated list
-    
-    def _add_custom_exercise(self, day_idx):
-        new_ex = {
-            "name": "New Exercise",
-            "sets": 3,
-            "reps": 10,
-            "weight": 0,
-            "rest_time": 60,
-            "history": []
-        }
-        self.current_plan.days[day_idx].setdefault('exercises', []).append(new_ex)
-        self.save_plan()
-        # Reopen editor to edit the new exercise
-        self.edit_day(day_idx)
-    
-    def delete_exercise(self, day_idx, ex_idx):
-        content = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(20))
-        ex_name = self.current_plan.days[day_idx]['exercises'][ex_idx].get('name', 'This exercise')
-        content.add_widget(Label(text=f"Delete '{ex_name}'?", size_hint_y=None, height=dp(40)))
-        
-        btn_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
-        cancel_btn = Button(text="Cancel")
-        delete_btn = Button(text="Delete", background_color=(1, 0.3, 0.3, 1))
-        
-        def confirm(*args):
-            self.current_plan.days[day_idx]['exercises'].pop(ex_idx)
-            self.save_plan()
-            self.refresh_ui()
-            popup.dismiss()
-        
-        cancel_btn.bind(on_press=lambda *a: popup.dismiss())
-        delete_btn.bind(on_press=confirm)
-        btn_row.add_widget(cancel_btn)
-        btn_row.add_widget(delete_btn)
-        content.add_widget(btn_row)
-        
-        popup = Popup(title="Confirm Delete", content=content, size_hint=(0.8, 0.4))
-        popup.open()
-    
-    # =============================================================================
-    # WORKOUT MODE
-    # =============================================================================
-    
-    def build_workout_screen(self):
+        self.planning_screen._render_days()
+        popup.dismiss()
+        logger.info(f"Deleted day at index {idx}")
+
+    def open_day_editor(self, idx: int):
+        day = self.plan_data["days"][idx]
+        popup = Popup(title=f"Edit: {day['name']}", size_hint=(0.95, 0.9))
         scroll = ScrollView(size_hint=(1, 1))
-        layout = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(5), size_hint_y=None)
-        layout.bind(minimum_height=layout.setter('height'))
-        
-        for idx, day in enumerate(self.current_plan.days):
-            if day.get('rest'):
-                continue  # Skip rest days in workout mode
-            
-            # Workout day card
-            card = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(80),
-                           canvas.before=[
-                               kivy.graphics.Color(rgba=(0.9, 0.95, 1, 1)),
-                               kivy.graphics.Rectangle(pos=self.root.pos, size=self.root.size)
-                           ])
-            
-            day_label = Label(text=f"🏋️ {day['name']}", font_size='18sp', bold=True)
-            start_btn = Button(text="▶️ Start Workout", size_hint_x=None, width=dp(150))
-            start_btn.bind(on_press=lambda _, d=day: self.start_workout_session(d))
-            
-            card.add_widget(day_label)
-            card.add_widget(start_btn)
-            layout.add_widget(card)
-        
-        scroll.add_widget(layout)
-        self.root.add_widget(scroll)
-    
-    def start_workout_session(self, day_data):
-        # In a real app, this would launch a dedicated workout logging screen
-        # For now, just toggle UI to show logging controls
-        self.refresh_ui()
-    
-    def log_actual_set(self, day_idx, ex_idx):
-        """Log what the user actually lifted (vs planned)"""
-        exercise = self.current_plan.days[day_idx]['exercises'][ex_idx]
-        
-        # In a full implementation, this would open a quick modal to enter actual reps/weight
-        # For demo, we'll just increment history with planned values
-        actual_entry = {
-            "sets": exercise.get('sets', 3),
-            "reps": exercise.get('reps', 10),
-            "weight": exercise.get('weight', 0),
-            "date": datetime.now().isoformat(),
-            "actual": True  # Flag to distinguish from planned values
-        }
-        exercise.setdefault('history', []).append(actual_entry)
-        self.save_plan()
-        
-        # Visual feedback
-        vibration.vibrate(0.1)  # Short haptic on log
-        # Could show toast: "Set logged! 🎯"
-    
-    # =============================================================================
-    # REST TIMER WITH VIBRATION FALLBACK
-    # =============================================================================
-    
-    def start_rest_timer(self, seconds):
-        """Start countdown with sound + vibration fallback"""
-        self.rest_remaining = seconds
-        self.rest_popup = Popup(
-            title="⏱️ Rest Period",
-            content=Label(text=f"{seconds}s", font_size='48sp', bold=True),
-            size_hint=(0.7, 0.3),
-            auto_dismiss=False
-        )
-        self.rest_popup.open()
-        
-        def update(dt):
-            if self.rest_remaining > 0:
-                self.rest_remaining -= 1
-                self.rest_popup.content.text = f"{self.rest_remaining}s"
-            else:
-                Clock.unschedule(update)
-                self.rest_popup.content.text = "✅ GO!"
-                # Play sound if available
-                if self.bell_sound:
-                    try:
-                        self.bell_sound.play()
-                    except:
-                        pass
-                # Vibration fallback (always works)
-                try:
-                    vibration.vibrate(0.5)  # 500ms vibration
-                except:
-                    pass  # plyer not available on desktop
-                # Auto-close after 2 seconds
-                Clock.schedule_once(lambda dt: self.rest_popup.dismiss(), 2)
-        
-        Clock.schedule_interval(update, 1)
-    
-    # =============================================================================
-    # EXERCISE LIBRARY MANAGER
-    # =============================================================================
-    
-    def open_exercise_library(self, instance):
-        content = ScrollView(size_hint=(1, None), size=(400, 400))
-        layout = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(15), size_hint_y=None)
-        layout.bind(minimum_height=layout.setter('height'))
-        
-        # Search bar
-        search = TextInput(hint_text="Search exercises...", multiline=False, size_hint_y=None, height=dp(40))
-        search.bind(text=self._filter_exercise_library)
-        layout.add_widget(search)
-        
-        # Exercise list container
-        self.lib_list_container = BoxLayout(orientation='vertical', spacing=dp(5))
-        self._render_exercise_library()
-        layout.add_widget(self.lib_list_container)
-        
-        # Add new exercise
-        add_btn = Button(text="+ Add New Exercise", size_hint_y=None, height=dp(50),
-                        background_color=(0.2, 0.8, 0.2, 1))
-        add_btn.bind(on_press=self.add_new_exercise_to_library)
-        layout.add_widget(add_btn)
-        
-        content.add_widget(layout)
-        popup = Popup(title="📚 Exercise Library", content=content, size_hint=(0.95, 0.9))
+        content = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10), size_hint_y=None)
+        content.bind(minimum_height=content.setter("height"))
+
+        name_input = TextInput(text=day["name"], multiline=False, size_hint_y=None, height=dp(40))
+        name_input.bind(text=lambda i, v: self._update_day_name(idx, v))
+        content.add_widget(name_input)
+
+        rest_switch = Switch(active=day.get("rest", False))
+        rest_switch.bind(active=lambda i, v: self._update_day_rest(idx, v))
+        content.add_widget(rest_switch)
+
+        for ex_idx, ex in enumerate(day.get("exercises", [])):
+            content.add_widget(self._build_exercise_card(idx, ex_idx, ex))
+
+        add_btn = Button(text="➕ Add Exercise", size_hint_y=None, height=dp(50))
+        add_btn.bind(on_press=lambda _: self._add_exercise(idx))
+        content.add_widget(add_btn)
+
+        scroll.add_widget(content)
+        popup.content = scroll
         popup.open()
-    
-    def _render_exercise_library(self, query=""):
-        self.lib_list_container.clear_widgets()
-        results = self.exercise_lib.search(query) if query else self.exercise_lib.exercises.items()
-        
-        for key, ex_data in results:
-            row = BoxLayout(size_hint_y=None, height=dp(50))
-            row.add_widget(Label(text=ex_data['name'], size_hint_x=0.6))
-            row.add_widget(Label(text=ex_data.get('muscle', ''), size_hint_x=0.2, color=(0.5, 0.5, 0.5, 1)))
-            
-            edit_btn = Button(text="✏️", size_hint_x=None, width=dp(40))
-            edit_btn.bind(on_press=lambda _, k=key: self.edit_exercise_in_library(k))
-            row.add_widget(edit_btn)
-            
-            self.lib_list_container.add_widget(row)
-    
-    def _filter_exercise_library(self, instance, query):
-        self._render_exercise_library(query)
-    
-    def add_new_exercise_to_library(self, instance):
-        # Simplified: in production, use a form popup
-        key = f"custom_{len(self.exercise_lib.exercises)}"
-        self.exercise_lib.add(key, "New Exercise", muscle="", equipment="")
-        self._render_exercise_library()
-    
-    def edit_exercise_in_library(self, key):
-        # Placeholder for edit form
-        pass
-    
-    # =============================================================================
-    # PROGRESS CHARTS (kivy-garden.graph)
-    # =============================================================================
-    
-    def show_progress_charts(self, instance):
+
+    def _update_day_name(self, idx, name):
+        self.plan_data["days"][idx]["name"] = name
+        self.save_plan()
+
+    def _update_day_rest(self, idx, is_rest):
+        self.plan_data["days"][idx]["rest"] = is_rest
+        self.save_plan()
+
+    def _build_exercise_card(self, day_idx: int, ex_idx: int, exercise: Dict) -> BoxLayout:
+        card = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(180), spacing=dp(5))
+        with card.canvas.before:
+            Color(rgba=(0.98, 0.98, 0.98, 1))
+            self.rect = Rectangle(pos=card.pos, size=card.size)
+            card.bind(pos=self._update_rect, size=self._update_rect)
+
+        header = BoxLayout(size_hint_y=None, height=dp(35))
+        header.add_widget(LongPressButton(
+            text=f"💪 {exercise.get('name', 'Exercise')}",
+            on_long_press=lambda _: self._delete_exercise(day_idx, ex_idx, card)
+        ))
+        header.add_widget(Label(text="(hold to del)", size_hint_x=None, width=dp(100), color=(0.6,0.6,0.6,1)))
+        card.add_widget(header)
+
+        # History
+        hist = exercise.get("history", [])
+        last = hist[-1] if hist else None
+        card.add_widget(Label(text=f"Last: {last['sets']}x{last['reps']}@{last['weight']}{self.unit}" if last else "No history", size_hint_y=None, height=dp(25), color=(0.4,0.4,0.4,1)))
+
+        # Inputs
+        inputs = BoxLayout(size_hint_y=None, height=dp(80), spacing=dp(5))
+        fields = [
+            ("Sets", exercise.get("sets", 3), False, "sets"),
+            ("Reps", exercise.get("reps", 10), False, "reps"),
+            ("Weight", exercise.get("weight", 0), True, "weight"),
+            ("Rest(s)", exercise.get("rest_time", 60), False, "rest_time")
+        ]
+        for hint, default, dec, key in fields:
+            ti = TextInput(text=str(default), hint_text=hint, input_filter="int" if not dec else "float", size_hint_x=0.25, height=dp(40))
+            ti.bind(on_text_validate=lambda i, k=key, d=default, dc=dec: self._save_exercise_field(day_idx, ex_idx, k, i.text, d, dc))
+            inputs.add_widget(ti)
+        card.add_widget(inputs)
+
+        # Actions
+        acts = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(10))
+        rest_btn = Button(text="⏱️ Rest")
+        rest_btn.bind(on_press=lambda _: self.start_rest_timer(exercise.get("rest_time", 60)))
+        acts.add_widget(rest_btn)
+        log_btn = Button(text="✓ Log", background_color=(0.2, 0.8, 0.2, 1))
+        log_btn.bind(on_press=lambda _: self.log_set(day_idx, ex_idx))
+        acts.add_widget(log_btn)
+        card.add_widget(acts)
+        return card
+
+    def _save_exercise_field(self, d_idx, e_idx, key, val, default, allow_dec):
+        self.plan_data["days"][d_idx]["exercises"][e_idx][key] = parse_numeric(val, allow_decimal=allow_dec, default=default)
+        self.save_plan()
+
+    def _add_exercise(self, idx):
+        self.plan_data["days"][idx].setdefault("exercises", []).append({
+            "name": "New Exercise", "sets": 3, "reps": 10, "weight": 0, "rest_time": 60, "history": []
+        })
+        self.save_plan()
+        self.open_day_editor(idx)
+
+    def _delete_exercise(self, d_idx, e_idx, widget):
+        self.plan_data["days"][d_idx]["exercises"].pop(e_idx)
+        self.save_plan()
+        widget.parent.remove_widget(widget)
+
+    def log_set(self, d_idx, e_idx):
+        ex = self.plan_data["days"][d_idx]["exercises"][e_idx]
+        ex.setdefault("history", []).append({
+            "sets": ex["sets"], "reps": ex["reps"], "weight": ex["weight"],
+            "date": datetime.now().isoformat()
+        })
+        self.save_plan()
+        safe_vibrate(0.1)
+        logger.info(f"Set logged: {ex['name']}")
+
+    def start_rest_timer(self, seconds: int):
+        if hasattr(self, "_timer_popup") and self._timer_popup:
+            self._timer_popup.dismiss()
+        self._timer_remaining = seconds
+        self._timer_popup = Popup(title="⏱️ Resting", size_hint=(0.7, 0.3), auto_dismiss=False)
+        self._timer_label = Label(text=f"{seconds}s", font_size=dp(48), bold=True)
+        self._timer_popup.content = self._timer_label
+        self._timer_popup.open()
+
+        def tick(dt):
+            if self._timer_remaining > 0:
+                self._timer_remaining -= 1
+                self._timer_label.text = f"{self._timer_remaining}s"
+            else:
+                Clock.unschedule(tick)
+                self._timer_label.text = "✅ GO!"
+                try: self.bell_sound.play() if self.bell_sound else None
+                except: pass
+                safe_vibrate(0.5)
+                Clock.schedule_once(lambda _: self._timer_popup.dismiss(), 1.5)
+
+        Clock.schedule_interval(tick, 1.0)
+
+    def open_workout_logger(self, day):
+        self.workout_mode = True
+        self.btn_mode.text = "🏋️ Workout"
+        self.sm.current = "workout"
+
+    def export_data(self):
+        try:
+            import json
+            from kivy.core.clipboard import Clipboard
+            Clipboard.copy(json.dumps(self.plan_data, indent=2))
+            Popup(title="✅ Exported", content=Label(text="Copied to clipboard!"), size_hint=(0.6, 0.3)).open()
+        except Exception as e:
+            logger.error(f"Export failed: {e}")
+
+    def open_charts(self):
         try:
             from kivy.garden.graph import Graph, MeshLinePlot
         except ImportError:
-            popup = Popup(
-                title="Chart Error",
-                content=Label(text="kivy-garden.graph not installed.\n\nInstall with:\npip install kivy-garden.graph"),
-                size_hint=(0.8, 0.4)
-            )
-            popup.open()
+            Popup(title="Missing Dependency", content=Label(text="Install kivy-garden.graph"), size_hint=(0.7, 0.3)).open()
             return
-        
-        # Collect data: best weight per exercise over time
-        exercise_data = {}
-        for day in self.current_plan.days:
-            for ex in day.get('exercises', []):
-                name = ex['name']
-                for entry in ex.get('history', []):
-                    if name not in exercise_data:
-                        exercise_data[name] = []
-                    # Convert date string to ordinal for x-axis
-                    try:
-                        date_obj = datetime.fromisoformat(entry['date'])
-                        exercise_data[name].append((date_obj.toordinal(), entry['weight']))
-                    except:
-                        continue
-        
-        if not exercise_data:
-            popup = Popup(
-                title="No Data Yet",
-                content=Label(text="Log some workouts to see progress charts! 💪"),
-                size_hint=(0.8, 0.4)
-            )
-            popup.open()
+
+        data = {}
+        for day in self.plan_data.get("days", []):
+            for ex in day.get("exercises", []):
+                name = ex["name"]
+                for entry in ex.get("history", []):
+                    data.setdefault(name, []).append((datetime.fromisoformat(entry["date"]).toordinal(), entry["weight"]))
+
+        if not data:
+            Popup(title="No Data", content=Label(text="Log workouts first."), size_hint=(0.6, 0.3)).open()
             return
-        
-        # Build chart UI
-        content = BoxLayout(orientation='vertical', padding=dp(10))
-        
-        # Dropdown to select exercise
-        ex_dropdown = DropDown()
-        for ex_name in exercise_data.keys():
-            btn = Button(text=ex_name, size_hint_y=None, height=dp(40))
-            btn.bind(on_release=lambda btn, name=ex_name: self._update_chart(graph, exercise_data[name], name))
-            ex_dropdown.add_widget(btn)
-        
-        select_ex_btn = Button(text="Select Exercise ▼", size_hint_y=None, height=dp(40))
-        select_ex_btn.bind(on_release=ex_dropdown.open)
-        content.add_widget(select_ex_btn)
-        
-        # Graph widget
-        graph = Graph(
-            xlabel='Date',
-            ylabel=f'Weight ({self.unit})',
-            x_ticks_minor=5,
-            x_ticks_major=10,
-            y_ticks_major=10,
-            y_grid_label=True,
-            x_grid_label=True,
-            y_grid=True,
-            x_grid=True,
-            draw_border=True
-        )
-        
-        # Plot first exercise by default
-        first_ex = list(exercise_data.keys())[0]
-        self._update_chart(graph, exercise_data[first_ex], first_ex)
-        
+
+        popup = Popup(title="📈 Progress", size_hint=(0.95, 0.9))
+        content = BoxLayout(orientation="vertical", padding=dp(10))
+        dropdown = DropDown()
+        for name in data:
+            btn = Button(text=name, size_hint_y=None, height=dp(40))
+            btn.bind(on_release=lambda btn, n=name: self._plot_data(graph, data[n], n))
+            dropdown.add_widget(btn)
+        sel = Button(text="Select Exercise ▼", size_hint_y=None, height=dp(40))
+        sel.bind(on_release=dropdown.open)
+        content.add_widget(sel)
+
+        graph = Graph(xlabel="Date", ylabel=f"Weight ({self.unit})", x_ticks_minor=5, x_ticks_major=10, y_grid_label=True, x_grid_label=True, y_grid=True, x_grid=True, draw_border=True)
         content.add_widget(graph)
-        
-        popup = Popup(title="📈 Strength Progress", content=content, size_hint=(0.95, 0.9))
+
+        first = list(data.keys())[0]
+        self._plot_data(graph, data[first], first)
+        popup.content = content
         popup.open()
-    
-    def _update_chart(self, graph, data_points, exercise_name):
-        graph.clear_plot()
-        if not data_points:
-            return
-        
-        # Sort by date
-        data_points.sort(key=lambda x: x[0])
-        
+
+    def _plot_data(self, graph, points, title):
+        graph.clear_plots()
+        points.sort(key=lambda x: x[0])
         plot = MeshLinePlot(color=[0.2, 0.6, 1, 1])
-        plot.points = data_points
+        plot.points = points
         graph.add_plot(plot)
-        
-        # Update axis labels
-        graph.xlabel = 'Date'
-        graph.ylabel = f'Weight ({self.unit})'
-        graph.title = exercise_name
-    
-    # =============================================================================
-    # EXPORT / BACKUP
-    # =============================================================================
-    
-    def export_plan(self, instance):
-        import json
-        from kivy.utils import platform
-        from kivy.core.clipboard import Clipboard
-        
-        export_data = {
-            'plan': self.current_plan.to_dict(),
-            'library': self.exercise_lib.exercises,
-            'exported_at': datetime.now().isoformat()
-        }
-        
-        json_str = json.dumps(export_data, indent=2)
-        Clipboard.copy(json_str)
-        
-        popup = Popup(
-            title="✅ Exported!",
-            content=Label(text="Plan copied to clipboard!\n\nPaste into a note or email to backup."),
-            size_hint=(0.8, 0.4)
-        )
-        popup.open()
-    
+        graph.title = title
+
+    def open_library(self):
+        Popup(title="📚 Library", content=Label(text="Library management coming in v2.1"), size_hint=(0.7, 0.4)).open()
+
+    def _update_rect(self, instance, value):
+        pass  # Handled in screen builds
+
     def on_pause(self):
         self.save_plan()
         return True
-    
+
     def on_resume(self):
         pass
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     SmartLiftApp().run()
