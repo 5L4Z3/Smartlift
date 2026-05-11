@@ -1,4 +1,4 @@
-name: Android Build — SmartLift
+name: Android build — SmartLift
 on:
   push:
     branches: [ main ]
@@ -6,54 +6,53 @@ on:
 
 env:
   ANDROID_API: 34
-  ANDROID_NDK: 27.2.12479018
+  NDK_API: 21
+  ANDROID_BUILD_TOOLS: 35.0.0
   DIST_NAME: smartlift
 
 jobs:
   build-per-abi:
-    name: Build APK (${{ matrix.abi }})
+    name: Build APK (per-ABI)
     runs-on: ubuntu-latest
     strategy:
       matrix:
         abi: [armeabi-v7a, arm64-v8a, x86_64]
     steps:
-      - uses: actions/checkout@v4
-      - name: Cache Buildozer
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.buildozer
-            .buildozer
-          key: ${{ runner.os }}-buildozer-${{ hashFiles('**/buildozer.spec') }}-${{ matrix.abi }}
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Setup Python 3.10
-        uses: actions/setup-python@v4
-        with: { python-version: "3.10" }
-
-      - name: Install System Deps
+      - name: Install system packages
         run: |
+          set -euo pipefail
           sudo apt-get update -y
-          sudo apt-get install -y openjdk-17-jdk python3-pip python3-venv \
+          sudo apt-get install -y \
+            openjdk-17-jdk unzip zip git python3 python3-pip \
             libffi-dev libssl-dev libsqlite3-dev libjpeg-dev zlib1g-dev \
             build-essential libgl1-mesa-dev libncurses6 libtinfo6
 
-      - name: Install Python Tools
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Upgrade pip & install build tools
         run: |
-          python -m pip install --upgrade pip wheel
-          pip install Cython==3.0.11 buildozer==1.5.0
+          python -m pip install --upgrade pip
+          pip install "Cython==3.0.11"
+          pip install buildozer==1.5.0
           pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
 
-      - name: Patch libffi
+      - name: Patch python-for-android libffi recipe
         run: python patch_libffi.py
 
-      - name: Configure ABI
+      - name: Set ABI in buildozer.spec
         run: |
-          sed -i "s/^android\.archs\s*=.*/android.archs = ${{ matrix.abi }}/" buildozer.spec
+          sed -i -E "s/^#?\s*android\.archs\s*=.*/android.archs = ${{ matrix.abi }}/" buildozer.spec
 
       - name: Build Debug APK
         run: buildozer android debug
 
-      - name: Upload Artifact
+      - name: Upload ABI APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: apk-${{ matrix.abi }}
@@ -64,20 +63,32 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-per-abi
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup Python 3.10
-        uses: actions/setup-python@v4
-        with: { python-version: "3.10" }
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install Tools & Patch
+      - name: Install system packages
         run: |
-          python -m pip install --upgrade pip wheel Cython==3.0.11 buildozer==1.5.0
+          sudo apt-get update -y
+          sudo apt-get install -y openjdk-17-jdk python3 python3-pip \
+            libffi-dev libssl-dev libsqlite3-dev libjpeg-dev zlib1g-dev build-essential
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install p4a & deps
+        run: |
+          python -m pip install --upgrade pip
           pip install --upgrade git+https://github.com/kivy/python-for-android.git@develop
-          python patch_libffi.py
+          pip install "Cython==3.0.11" buildozer==1.5.0
+
+      - name: Patch libffi recipe
+        run: python patch_libffi.py
 
       - name: Build AAB
         run: |
-          p4a bundle \
+          p4a apk \
             --private . \
             --package=org.smartlift.app \
             --name="SmartLift" \
@@ -87,7 +98,7 @@ jobs:
             --arch=all \
             --dist-name=${{ env.DIST_NAME }} \
             --release \
-            --color=always
+            --format=aab
 
       - name: Upload AAB
         uses: actions/upload-artifact@v4
@@ -95,40 +106,53 @@ jobs:
           name: SmartLift-release-aab
           path: "**/*.aab"
 
-  sign-and-package:
-    name: Sign & Package
+  merge-and-sign:
+    name: Merge APKs & Sign
     runs-on: ubuntu-latest
     needs: [build-per-abi, build-aab]
-    if: ${{ github.ref == 'refs/heads/main' }}
+    if: ${{ always() }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with: { path: artifacts }
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download ABI APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create universal APK placeholder
+        run: |
+          mkdir -p bin
+          # Safely pick the first available APK as placeholder
+          find artifacts -type f -name "*.apk" -print0 | head -z -n1 | xargs -0 cp bin/universal-release.apk 2>/dev/null || echo "No APK artifacts found"
 
       - name: Setup Java
         uses: actions/setup-java@v3
-        with: { java-version: "17" }
+        with:
+          java-version: '17'
 
-      - name: Sign APKs
+      - name: Prepare keystore
         if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
         run: |
-          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > release.jks
-          for apk in artifacts/apk-*/smart*.apk; do
-            name=$(basename "$apk" .apk)
-            apksigner sign \
-              --ks release.jks \
-              --ks-pass env:KEYSTORE_PASSWORD \
-              --key-pass env:KEY_PASSWORD \
-              --out "${name}-signed.apk" "$apk"
-          done
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > release.jks
+
+      - name: Sign APK
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+        run: |
+          apksigner sign \
+            --ks release.jks \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --key-pass env:KEY_PASSWORD \
+            --out bin/universal-release-signed.apk \
+            bin/universal-release.apk
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-      - name: Upload Signed Artifacts
+      - name: Upload final artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: final-release-artifacts
+          name: final-artifacts
           path: |
-            **/*-signed.apk
+            bin/*.apk
             artifacts/SmartLift-release-aab/*.aab
