@@ -1,47 +1,41 @@
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
+*$py.class
 *.so
+*.egg-info/
+dist/
+build/
+*.egg
 
-# Virtual environments
+# Venv
 .venv/
 venv/
-ENV/
 env/
 
-# Buildozer files
-.buildozer/
-bin/
-.gradle/
-.keystore
-.local.properties
-
-# Android Studio / IntelliJ
-.idea/
-*.iml
-*.ipr
-*.iws
-
-# VS Code
+# IDEs
 .vscode/
+.idea/
+*.swp
+*.swo
 
-# OS-specific files
+# OS
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
+# Buildozer / p4a
+.buildozer/
+bin/
+*.keystore
+*.jks
+*.p12
+.secrets/
 
-# Packaging
-*.spec
-dist/
-build/
-
-# Kivy / App assets cache
+# Kivy
 *.atlas
+*.ttf.cache
 
-# GitHub Actions temp
+# CI/CD caches
 .github/workflows/__pycache__/
 .github/scripts/__pycache__/
+*.log
